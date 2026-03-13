@@ -1,8 +1,8 @@
 use std::ffi::c_void;
 use std::slice;
 
-use atree::dvec::DVec;
 use atree::ATree;
+use atree::dvec::DVec;
 
 // Type-erased handle storing an ATree<D> behind a void pointer
 #[repr(C)]
@@ -34,11 +34,7 @@ fn create_typed<const D: usize>(positions: &[f32], num_points: usize) -> *mut AT
     Box::into_raw(handle)
 }
 
-fn query_radius_typed<const D: usize>(
-    handle: &ATreeHandle,
-    pos: &[f32],
-    radius: f64,
-) -> Vec<u64> {
+fn query_radius_typed<const D: usize>(handle: &ATreeHandle, pos: &[f32], radius: f64) -> Vec<u64> {
     let tree = unsafe { &*(handle.inner as *const ATree<D>) };
     let mut components = [0.0f32; D];
     components.copy_from_slice(&pos[..D]);
@@ -84,6 +80,10 @@ macro_rules! dispatch {
             14 => $func::<14>($($args),*),
             15 => $func::<15>($($args),*),
             16 => $func::<16>($($args),*),
+            18 => $func::<18>($($args),*),
+            20 => $func::<20>($($args),*),
+            22 => $func::<22>($($args),*),
+            24 => $func::<24>($($args),*),
             _ => panic!("unsupported dimension: {}", $dim),
         }
     };
@@ -132,7 +132,14 @@ pub unsafe extern "C" fn atree_query_radius(
     let dim = handle.dim;
     let pos_slice = unsafe { slice::from_raw_parts(pos, dim) };
     let out_slice = unsafe { slice::from_raw_parts_mut(out_ids, out_capacity) };
-    dispatch!(dim, query_radius_buf_typed, handle, pos_slice, radius, out_slice)
+    dispatch!(
+        dim,
+        query_radius_buf_typed,
+        handle,
+        pos_slice,
+        radius,
+        out_slice
+    )
 }
 
 /// Query all points within `radius` of `pos`, allocating the result array.
