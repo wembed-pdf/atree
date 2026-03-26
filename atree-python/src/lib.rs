@@ -3,8 +3,7 @@ use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods}
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use ::atree::dvec::DVec;
-use ::atree::ATree as ATreeRust;
+use ::atree::{ATree as ATreeRust, DynATree};
 
 enum Inner {
     D2(ATreeRust<2>),
@@ -22,9 +21,10 @@ enum Inner {
     D14(ATreeRust<14>),
     D15(ATreeRust<15>),
     D16(ATreeRust<16>),
+    Dyn(DynATree<f32, u32>),
 }
 
-fn build_vecs<const D: usize>(positions: ArrayView2<f32>) -> Vec<DVec<D>> {
+fn build_vecs<const D: usize>(positions: ArrayView2<f32>) -> Vec<[f32; D]> {
     positions
         .rows()
         .into_iter()
@@ -33,34 +33,36 @@ fn build_vecs<const D: usize>(positions: ArrayView2<f32>) -> Vec<DVec<D>> {
             for (i, &v) in row.iter().enumerate().take(D) {
                 components[i] = v;
             }
-            DVec::new(components)
+            components
         })
         .collect()
+}
+fn build_vecs_flat<'a>(positions: &'a ArrayView2<'a, f32>) -> &'a [f32] {
+    positions.as_slice().unwrap_or(&[])
 }
 
 macro_rules! create_inner {
     ($positions:expr, $dim:expr, $($d:literal => $variant:ident),+ $(,)?) => {
         match $dim {
-            $($d => Ok(Inner::$variant(ATreeRust::new(build_vecs::<$d>($positions)))),)+
-            _ => Err(PyValueError::new_err(format!(
-                "unsupported dimension: {} (must be 2..=16)", $dim
-            ))),
+            $($d => Inner::$variant(ATreeRust::new(build_vecs::<$d>($positions).as_slice())),)+
+            d => Inner::Dyn(DynATree::new(d, build_vecs_flat(&$positions))),
         }
     };
 }
 
-fn query_radius_inner<const D: usize>(
-    tree: &ATreeRust<D>,
-    pos: &[f32],
-    radius: f64,
-) -> Vec<u64> {
+fn query_radius_inner<const D: usize>(tree: &ATreeRust<D>, pos: &[f32], radius: f64) -> Vec<u64> {
     let mut components = [0.0f32; D];
     for (i, &v) in pos.iter().enumerate().take(D) {
         components[i] = v;
     }
-    let dvec = DVec::new(components);
+    let dvec = components;
     let mut results = Vec::new();
-    tree.query_radius(dvec, radius, &mut results);
+    tree.query_radius(&dvec, radius as f32, &mut results);
+    results
+}
+fn query_radius_inner_dyn(tree: &DynATree<f32, u32>, pos: &[f32], radius: f64) -> Vec<u64> {
+    let mut results = Vec::new();
+    tree.query_radius(&pos, radius as f32, &mut results);
     results
 }
 
@@ -82,6 +84,7 @@ macro_rules! dispatch_query {
             Inner::D14(t) => query_radius_inner(t, $pos, $radius),
             Inner::D15(t) => query_radius_inner(t, $pos, $radius),
             Inner::D16(t) => query_radius_inner(t, $pos, $radius),
+            Inner::Dyn(t) => query_radius_inner_dyn(t, $pos, $radius),
         }
     };
 }
@@ -96,7 +99,7 @@ struct ATree {
 #[pymethods]
 impl ATree {
     #[new]
-    fn new(positions: PyReadonlyArray2<f32>) -> PyResult<Self> {
+    fn new(positions: PyReadonlyArray2<f32>) -> Self {
         let shape = positions.shape();
         let num_points = shape[0];
         let dim = shape[1];
@@ -107,13 +110,13 @@ impl ATree {
             2 => D2, 3 => D3, 4 => D4, 5 => D5, 6 => D6, 7 => D7, 8 => D8,
             9 => D9, 10 => D10, 11 => D11, 12 => D12, 13 => D13, 14 => D14,
             15 => D15, 16 => D16,
-        )?;
+        );
 
-        Ok(ATree {
+        ATree {
             inner,
             dim,
             point_count: num_points,
-        })
+        }
     }
 
     fn query_radius<'py>(

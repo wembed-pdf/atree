@@ -1,8 +1,7 @@
 use std::ffi::c_void;
 use std::slice;
 
-use atree::ATree;
-use atree::dvec::DVec;
+use atree::{ATree, DynATree};
 
 // Type-erased handle storing an ATree<D> behind a void pointer
 #[repr(C)]
@@ -16,15 +15,18 @@ pub struct ATreeHandle {
 unsafe fn drop_atree<const D: usize>(ptr: *mut c_void) {
     drop(unsafe { Box::from_raw(ptr as *mut ATree<D>) });
 }
+unsafe fn drop_dyn_atree(ptr: *mut c_void) {
+    drop(unsafe { Box::from_raw(ptr as *mut DynATree<f32, u64>) });
+}
 
 fn create_typed<const D: usize>(positions: &[f32], num_points: usize) -> *mut ATreeHandle {
     let mut vecs = Vec::with_capacity(num_points);
     for i in 0..num_points {
         let mut components = [0.0f32; D];
         components.copy_from_slice(&positions[i * D..(i + 1) * D]);
-        vecs.push(DVec::new(components));
+        vecs.push(components);
     }
-    let tree = Box::new(ATree::new(vecs));
+    let tree = Box::new(ATree::<D, 8, f32, u32>::new(vecs.as_slice()));
     let handle = Box::new(ATreeHandle {
         inner: Box::into_raw(tree) as *mut c_void,
         dim: D,
@@ -34,36 +36,36 @@ fn create_typed<const D: usize>(positions: &[f32], num_points: usize) -> *mut AT
     Box::into_raw(handle)
 }
 
+fn create_dyn(d: usize, positions: &[f32], num_points: usize) -> *mut ATreeHandle {
+    let tree = Box::new(DynATree::<f32, u32>::new(d, positions));
+    let handle = Box::new(ATreeHandle {
+        inner: Box::into_raw(tree) as *mut c_void,
+        dim: d,
+        point_count: num_points,
+        drop_fn: drop_dyn_atree,
+    });
+    Box::into_raw(handle)
+}
+
 fn query_radius_typed<const D: usize>(handle: &ATreeHandle, pos: &[f32], radius: f64) -> Vec<u64> {
     let tree = unsafe { &*(handle.inner as *const ATree<D>) };
     let mut components = [0.0f32; D];
     components.copy_from_slice(&pos[..D]);
-    let dvec = DVec::new(components);
+    let dvec = components;
     let mut results = Vec::new();
-    tree.query_radius(dvec, radius, &mut results);
+    tree.query_radius(&dvec, radius as f32, &mut results);
     results
 }
-
-fn query_radius_buf_typed<const D: usize>(
-    handle: &ATreeHandle,
-    pos: &[f32],
-    radius: f64,
-    out_ids: &mut [u64],
-) -> usize {
-    let tree = unsafe { &*(handle.inner as *const ATree<D>) };
-    let mut components = [0.0f32; D];
-    components.copy_from_slice(&pos[..D]);
-    let dvec = DVec::new(components);
+fn query_radius_dyn(_d: usize, handle: &ATreeHandle, pos: &[f32], radius: f64) -> Vec<u64> {
+    let tree = unsafe { &*(handle.inner as *const DynATree<f32, u64>) };
     let mut results = Vec::new();
-    tree.query_radius(dvec, radius, &mut results);
-    let count = results.len().min(out_ids.len());
-    out_ids[..count].copy_from_slice(&results[..count]);
-    count
+    tree.query_radius(pos, radius as f32, &mut results);
+    results
 }
 
 // Dispatch macro: maps runtime dim to const generic D
 macro_rules! dispatch {
-    ($dim:expr, $func:ident $(, $args:expr)*) => {
+    ($dim:expr, $func:ident, $dyn: ident $(, $args:expr)*) => {
         match $dim {
             2 => $func::<2>($($args),*),
             3 => $func::<3>($($args),*),
@@ -84,7 +86,7 @@ macro_rules! dispatch {
             20 => $func::<20>($($args),*),
             22 => $func::<22>($($args),*),
             24 => $func::<24>($($args),*),
-            _ => panic!("unsupported dimension: {}", $dim),
+            d => $dyn(d, $($args),*),
         }
     };
 }
@@ -104,7 +106,7 @@ pub unsafe extern "C" fn atree_create(
         return std::ptr::null_mut();
     }
     let data = unsafe { slice::from_raw_parts(positions, num_points * dim) };
-    dispatch!(dim, create_typed, data, num_points)
+    dispatch!(dim, create_typed, create_dyn, data, num_points)
 }
 
 /// Destroy an ATree handle and free its memory.
@@ -117,35 +119,10 @@ pub unsafe extern "C" fn atree_destroy(handle: *mut ATreeHandle) {
     unsafe { (handle.drop_fn)(handle.inner) };
 }
 
-/// Query all points within `radius` of `pos`, writing results to `out_ids`.
-/// Returns the number of results found (may exceed `out_capacity`, in which case
-/// only `out_capacity` results are written).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn atree_query_radius(
-    handle: *const ATreeHandle,
-    pos: *const f32,
-    radius: f64,
-    out_ids: *mut u64,
-    out_capacity: usize,
-) -> usize {
-    let handle = unsafe { &*handle };
-    let dim = handle.dim;
-    let pos_slice = unsafe { slice::from_raw_parts(pos, dim) };
-    let out_slice = unsafe { slice::from_raw_parts_mut(out_ids, out_capacity) };
-    dispatch!(
-        dim,
-        query_radius_buf_typed,
-        handle,
-        pos_slice,
-        radius,
-        out_slice
-    )
-}
-
 /// Query all points within `radius` of `pos`, allocating the result array.
 /// Caller must free with `atree_free_results`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn atree_query_radius_alloc(
+pub unsafe extern "C" fn atree_query_radius(
     handle: *const ATreeHandle,
     pos: *const f32,
     radius: f64,
@@ -155,7 +132,14 @@ pub unsafe extern "C" fn atree_query_radius_alloc(
     let handle = unsafe { &*handle };
     let dim = handle.dim;
     let pos_slice = unsafe { slice::from_raw_parts(pos, dim) };
-    let mut results: Vec<u64> = dispatch!(dim, query_radius_typed, handle, pos_slice, radius);
+    let mut results: Vec<u64> = dispatch!(
+        dim,
+        query_radius_typed,
+        query_radius_dyn,
+        handle,
+        pos_slice,
+        radius
+    );
     results.shrink_to_fit();
     unsafe {
         *out_count = results.len();
