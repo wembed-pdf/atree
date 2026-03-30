@@ -1,15 +1,15 @@
-[workspace]
-members = [".", "atree-ffi", "atree-python"]
-
 [package]
 name = "atree"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-default = ["simd-compress"]
-simd-compress = ["dep:simd-lookup", "dep:wide"]
-
 [dependencies]
 simd-lookup = { version = "0.1.0", optional = true }
 wide = { version = "0.8", optional = true }
+nalgebra = { version = "0.34", optional = true }
+num-traits = { version = "0.2",  default-features = false }
+
+[features]
+default = ["simd-compress", "svd"]
+simd-compress = ["dep:simd-lookup", "dep:wide"]
+svd = ["nalgebra"]

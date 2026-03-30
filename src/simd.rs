@@ -3,6 +3,7 @@ use std::mem::MaybeUninit;
 use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 
+use num_traits::Float;
 #[cfg(feature = "simd-compress")]
 use wide::CmpLe;
 
@@ -72,7 +73,17 @@ where
         let mut acc = diff.map(|x| x * x);
         for j in 1..D {
             let diff: [_; W] = std::array::from_fn(|i| self.lanes[j][i] - pos[j]);
-            acc = std::array::from_fn(|i| diff[i].mul_add(diff[i], acc[i]));
+            acc = std::array::from_fn(|i| Float::mul_add(diff[i], diff[i], acc[i]));
+        }
+        acc
+    }
+    #[inline(always)]
+    pub fn dist_squared_no_fma(&self, pos: [F; D]) -> [F; W] {
+        let diff = std::array::from_fn(|i| self.lanes[0][i] - pos[0]);
+        let mut acc = diff.map(|x| x * x);
+        for j in 1..D {
+            let diff: [_; W] = std::array::from_fn(|i| self.lanes[j][i] - pos[j]);
+            acc = std::array::from_fn(|i| diff[i] * diff[i] + acc[i]);
         }
         acc
     }
@@ -83,13 +94,56 @@ where
         let mut acc2: [F; W] = std::array::from_fn(|_| squared_half);
 
         for j in (0..D).step_by(2) {
-            acc1 = std::array::from_fn(|i| self.lanes[j][i].mul_add(-pos[j], acc1[i]));
+            acc1 = std::array::from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc1[i]));
             if j + 1 < D {
-                acc2 = std::array::from_fn(|i| self.lanes[j + 1][i].mul_add(-pos[j + 1], acc2[i]));
+                acc2 = std::array::from_fn(|i| {
+                    Float::mul_add(self.lanes[j + 1][i], -pos[j + 1], acc2[i])
+                });
             }
         }
 
         std::array::from_fn(|i| acc1[i] + acc2[i])
+    }
+
+    #[inline(always)]
+    pub fn dist_half_squared_4_acc(&self, pos: [F; D], squared_half: F) -> [F; W] {
+        let mut acc1: [F; W] = std::array::from_fn(|i| self.sqared_half[i]);
+        let mut acc2: [F; W] = std::array::from_fn(|_| squared_half);
+        let mut acc3: [F; W] = std::array::from_fn(|_| F::ZERO);
+        let mut acc4: [F; W] = std::array::from_fn(|_| F::ZERO);
+
+        for j in (0..D).step_by(4) {
+            // let j = j * 2;
+            acc1 = std::array::from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc1[i]));
+            if j + 1 < D {
+                acc2 = std::array::from_fn(|i| {
+                    Float::mul_add(self.lanes[j + 1][i], -pos[j + 1], acc2[i])
+                });
+            }
+            if j + 2 < D {
+                acc3 = std::array::from_fn(|i| {
+                    Float::mul_add(self.lanes[j + 2][i], -pos[j + 2], acc3[i])
+                });
+            }
+            if j + 3 < D {
+                acc4 = std::array::from_fn(|i| {
+                    Float::mul_add(self.lanes[j + 3][i], -pos[j + 3], acc4[i])
+                });
+            }
+        }
+
+        std::array::from_fn(|i| acc1[i] + acc2[i] + acc3[i] + acc4[i])
+    }
+
+    #[inline(always)]
+    pub fn dist_half_squared_single_acc(&self, pos: [F; D], squared_half: F) -> [F; W] {
+        let mut acc: [F; W] = std::array::from_fn(|i| self.sqared_half[i] + squared_half);
+
+        for j in (0..D).step_by(1) {
+            acc = std::array::from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc[i]));
+        }
+
+        acc
     }
 
     /// Scalar compress fallback — available to all CompressDispatch impls.

@@ -1,5 +1,15 @@
 use std::iter::Sum;
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+
+use num_traits::FromPrimitive;
+
+#[cfg(feature = "svd")]
+pub trait Svd: nalgebra::RealField {}
+#[cfg(not(feature = "svd"))]
+pub trait Svd {}
+
+impl Svd for f32 {}
+impl Svd for f64 {}
 
 pub trait Scalar:
     Copy
@@ -7,28 +17,33 @@ pub trait Scalar:
     + PartialOrd
     + 'static
     + Add<Output = Self>
+    + AddAssign
     + Sub<Output = Self>
+    + SubAssign
     + Mul<Output = Self>
+    + MulAssign
     + Div<Output = Self>
+    + DivAssign
     + Neg<Output = Self>
+    + FromPrimitive
     + Sum
     + Send
     + Sync
-    + std::fmt::Debug
+    + num_traits::Float
+    + std::fmt::Debug // TODO:
+    + Svd
 {
     const NAN: Self;
     const INFINITY: Self;
     const ZERO: Self;
     const HALF: Self;
     const ONE: Self;
-    fn mul_add(self, a: Self, b: Self) -> Self;
+    const DIST_EPS: Self;
+    fn to_usize_unchecked(self) -> usize;
     fn sqrt(self) -> Self;
     fn powi(self, n: i32) -> Self;
     fn floor(self) -> Self;
     fn ceil(self) -> Self;
-    fn from_usize(v: usize) -> Self;
-    fn from_f32(v: f32) -> Self;
-    fn to_f32(self) -> f32;
     fn total_cmp(&self, other: &Self) -> std::cmp::Ordering;
 }
 
@@ -46,10 +61,11 @@ impl Scalar for f32 {
     const ZERO: Self = 0.0;
     const HALF: Self = 0.5;
     const ONE: Self = 1.0;
+    const DIST_EPS: Self = 1e-4;
 
     #[inline(always)]
-    fn mul_add(self, a: Self, b: Self) -> Self {
-        f32::mul_add(self, a, b)
+    fn to_usize_unchecked(self) -> usize {
+        self as usize
     }
     #[inline(always)]
     fn sqrt(self) -> Self {
@@ -68,18 +84,6 @@ impl Scalar for f32 {
         f32::ceil(self)
     }
     #[inline(always)]
-    fn from_usize(v: usize) -> Self {
-        v as f32
-    }
-    #[inline(always)]
-    fn from_f32(v: f32) -> Self {
-        v
-    }
-    #[inline(always)]
-    fn to_f32(self) -> f32 {
-        self
-    }
-    #[inline(always)]
     fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
         f32::total_cmp(self, other)
     }
@@ -93,10 +97,11 @@ impl Scalar for f64 {
     const ZERO: Self = 0.0;
     const HALF: Self = 0.5;
     const ONE: Self = 1.0;
+    const DIST_EPS: Self = 1e-8;
 
     #[inline(always)]
-    fn mul_add(self, a: Self, b: Self) -> Self {
-        f64::mul_add(self, a, b)
+    fn to_usize_unchecked(self) -> usize {
+        self as usize
     }
     #[inline(always)]
     fn sqrt(self) -> Self {
@@ -113,18 +118,6 @@ impl Scalar for f64 {
     #[inline(always)]
     fn ceil(self) -> Self {
         f64::ceil(self)
-    }
-    #[inline(always)]
-    fn from_usize(v: usize) -> Self {
-        v as f64
-    }
-    #[inline(always)]
-    fn from_f32(v: f32) -> Self {
-        v as f64
-    }
-    #[inline(always)]
-    fn to_f32(self) -> f32 {
-        self as f32
     }
     #[inline(always)]
     fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {

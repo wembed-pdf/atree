@@ -1,6 +1,9 @@
+use num_traits::Float;
+
 use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{CompressDispatch, LaneCount, PDVec, SupportedLaneCount, compress_with_ids};
+use crate::svd::DynamicSVD;
 use crate::tree::{
     LeafRange, Positions, Snn, build_tree, children, compute_total_depth, lut_size_for_dim,
 };
@@ -17,7 +20,7 @@ pub(crate) struct FlatPositions<'a, F> {
     dim: usize,
 }
 
-impl<F: Scalar> Positions<F> for FlatPositions<'_, F> {
+impl<'a, F: Scalar> Positions<F> for FlatPositions<'a, F> {
     #[inline(always)]
     fn dim(&self) -> usize {
         self.dim
@@ -65,27 +68,41 @@ impl<const W: usize, F: Scalar, I: IdStorage> DynPDVec<W, F, I> {
         let mut acc = diff.map(|x| x * x);
         for j in 1..dim {
             let diff: [F; W] = from_fn(|i| self.lanes[j][i] - pos[j]);
-            acc = from_fn(|i| diff[i].mul_add(diff[i], acc[i]));
+            acc = from_fn(|i| Float::mul_add(diff[i], diff[i], acc[i]));
         }
         acc
     }
 
     #[inline(always)]
     fn dist_half_squared(&self, pos: &[F], squared_half: F) -> [F; W] {
-        let dim = self.lanes.len();
-        let mut acc1: [F; W] = self.squared_half;
-        let mut acc2: [F; W] = [squared_half; W];
+        // let dim = self.lanes.len();
+        const UNROLL: usize = 8;
+        let mut accs: [_; UNROLL] = std::array::from_fn(|i| {
+            if i == 0 {
+                self.squared_half
+            } else if i == 1 {
+                [squared_half; W]
+            } else {
+                [F::ZERO; W]
+            }
+        });
 
-        for j in 0..dim / 2 {
-            let j = j * 2;
-            acc1 = from_fn(|i| self.lanes[j][i].mul_add(-pos[j], acc1[i]));
-            acc2 = from_fn(|i| self.lanes[j + 1][i].mul_add(-pos[j + 1], acc2[i]));
+        let (chunks, remainder) = self.lanes.as_chunks::<UNROLL>();
+        let (pos_chunks, pos_remainder) = pos.as_chunks::<UNROLL>();
+        for (chunk, pos_slice) in chunks.iter().zip(pos_chunks) {
+            for ((acc, slice), &p) in accs.iter_mut().zip(chunk.iter()).zip(pos_slice.iter()) {
+                *acc = from_fn(|i| Float::mul_add(slice[i], -p, acc[i]));
+            }
         }
-        if dim & 1 > 0 {
-            acc1 = from_fn(|i| self.lanes[dim - 1][i].mul_add(-pos[dim - 1], acc1[i]));
+        let mut acc: [F; W] = accs[0];
+        for (slice, &p) in remainder.iter().zip(pos_remainder.iter()) {
+            acc = from_fn(|i| Float::mul_add(slice[i], -p, acc[i]));
+        }
+        for j in 1..UNROLL {
+            acc = from_fn(|i| acc[i] + accs[j][i]);
         }
 
-        from_fn(|i| acc1[i] + acc2[i])
+        acc
     }
 }
 
@@ -146,12 +163,14 @@ thread_local! {
 pub struct DynATree<F: Scalar = f32, I: IdStorage = u32> {
     dim: usize,
     positions: Vec<F>,
+    // positions_projected: Vec<F>,
     positions_sorted: Vec<DynPDVec<W, F, I>>,
     node_ids: Vec<usize>,
     d_pos: Vec<F>,
     nodes: Vec<F>,
     leaves: Vec<Snn<F>>,
     total_depth: usize,
+    svd: DynamicSVD<F>,
 }
 
 impl<F: Scalar, I: IdStorage> DynATree<F, I>
@@ -176,13 +195,15 @@ where
 
         let mut tree = DynATree {
             dim,
-            positions: Vec::new(),
+            positions: positions.to_vec(),
+            // positions_projected: Vec::new(),
             positions_sorted: Vec::new(),
             node_ids: Vec::new(),
             d_pos: Vec::new(),
             nodes: vec![F::ZERO; num_internal],
             leaves: vec![Snn::default(); num_leaves],
             total_depth: td,
+            svd: DynamicSVD::new(),
         };
         if !positions.is_empty() {
             tree.update(positions);
@@ -195,16 +216,27 @@ where
     /// `positions` must have length `n * dim` (same dim as construction).
     pub fn update(&mut self, positions: &[F]) {
         assert!(positions.len() % self.dim == 0);
+        self.positions.copy_from_slice(positions);
         let n = positions.len() / self.dim;
-
-        if self.positions.len() != positions.len() {
-            self.positions = positions.to_vec();
-        } else {
-            self.positions.copy_from_slice(positions);
-        }
 
         let td = compute_total_depth(n);
         self.total_depth = td;
+
+        self.svd.compute_svd(
+            &positions
+                .chunks(self.dim)
+                .map(|chunk| chunk)
+                .collect::<Vec<_>>(),
+        );
+
+        let positions_projected = positions
+            .chunks(self.dim)
+            .map(|chunk| {
+                self.svd
+                    .project(&chunk.iter().map(|&x| x).collect::<Vec<_>>())
+            })
+            .flatten()
+            .collect::<Vec<_>>();
 
         let num_internal = (1usize << td) - 1;
         let num_leaves = 1usize << td;
@@ -222,7 +254,7 @@ where
         let mut d_pos = vec![F::ZERO; node_ids.len()];
 
         let pos_view = FlatPositions {
-            data: &self.positions,
+            data: &positions_projected,
             dim: self.dim,
         };
         build_tree(
@@ -244,6 +276,9 @@ where
 
         let dim = self.dim;
         for snn in self.leaves.iter_mut() {
+            if snn.lut.is_empty() {
+                continue;
+            }
             let offset = snn.lut[0];
             let last = snn.lut.last().expect("empty lut");
             let node_ids = &self.node_ids[offset..*last];
@@ -298,15 +333,28 @@ where
         O: QueryOutput<I, F>,
     {
         assert_eq!(pos.len(), self.dim);
+        let pos_projected = DynPoint::new(&self.svd.project(pos));
         let pos = DynPoint::new(pos);
         let radius_sq = radius * radius;
+        let normalized_radius = self.svd.normalize_radius(radius);
+        let norm_radius_sq = normalized_radius * normalized_radius;
+
+        // let pos_projected = DynPoint::new(&pos.pos);
+        // let norm_radius_sq = radius_sq;
 
         SCRATCH.with(|scratch| {
             let mut ranges = scratch.take();
             ranges.clear();
 
             let mut distances = vec![F::ZERO; self.dim];
-            let _ = self.collect_ranges(&pos, 0, 0, radius_sq, &mut distances, &mut ranges);
+            let _ = self.collect_ranges(
+                &pos_projected,
+                0,
+                0,
+                norm_radius_sq,
+                &mut distances,
+                &mut ranges,
+            );
 
             self.snn(results, &pos, radius_sq, &ranges);
 
@@ -352,21 +400,21 @@ where
             }
 
             let own_pos = pos.pos[dim] - snn.min;
-            let reduced_radius = (dim_radius_squared + distances[dim]).sqrt();
+            let reduced_radius = Float::sqrt(dim_radius_squared + distances[dim]);
             let min = own_pos - reduced_radius;
             let max = own_pos + reduced_radius;
             let max_lut = lut_size_for_dim(self.dim) - 1;
 
             let min_scaled = min * snn.resolution;
             let idx = if min_scaled >= F::ZERO {
-                F::to_f32(min_scaled) as usize
+                min_scaled.to_usize_unchecked()
             } else {
                 0
             }
             .min(max_lut);
             let max_scaled = max * snn.resolution;
             let end_idx = if max_scaled >= F::ZERO {
-                F::to_f32(max_scaled) as usize
+                max_scaled.to_usize_unchecked()
             } else {
                 0
             }
@@ -384,7 +432,7 @@ where
         let (left, right) = children(heap_idx);
         let own_pos = pos.pos[dim];
         let current_delta = distances[dim];
-        let dist = (own_pos - split).powi(2);
+        let dist = Float::powi(own_pos - split, 2);
         let other_radius = dim_radius_squared + current_delta - dist;
 
         let mut total = 0;
@@ -414,7 +462,7 @@ where
         let mut capacity = results.capacity();
         let initial_len = results.len();
         let mut len = results.len();
-        let half_radius_threshold = radius_sq * F::HALF + F::from_f32(1e-4);
+        let half_radius_threshold = radius_sq * F::HALF + F::from_f32(1e-4).unwrap();
         let use_half = self.dim >= 6;
 
         for range in ranges.iter() {

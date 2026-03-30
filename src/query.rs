@@ -1,7 +1,7 @@
 use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{CompressDispatch, LaneCount, PDVec, SupportedLaneCount};
-use crate::tree::{ATree, LeafRange, Point, children, lut_size};
+use crate::tree::{ATree, LeafRange, Point, SVD_THRESHOLD, children, lut_size};
 use std::cell::Cell;
 
 thread_local! {
@@ -19,16 +19,28 @@ where
         O: QueryOutput<I, F>,
         PDVec<D, W, F, I>: CompressDispatch<W, F, I>,
     {
-        let pos = Point::new(*pos);
+        let projected_pos = if D > SVD_THRESHOLD {
+            self.svd.project(pos)
+        } else {
+            *pos
+        };
+
         let radius_sq = radius * radius;
 
         SCRATCH.with(|scratch| {
             let mut ranges = scratch.take();
             ranges.clear();
 
-            let _ = self.collect_ranges(&pos, 0, 0, radius_sq, &mut [F::ZERO; D], &mut ranges);
+            let _ = self.collect_ranges(
+                &projected_pos,
+                0,
+                0,
+                radius_sq,
+                &mut [F::ZERO; D],
+                &mut ranges,
+            );
 
-            self.snn(results, pos, radius_sq, &ranges);
+            self.snn(results, Point::new(*pos), radius_sq, &ranges);
 
             scratch.set(ranges);
         });
@@ -37,7 +49,7 @@ where
     /// Collect leaf ranges and return total PDVec count across all ranges.
     pub(crate) fn collect_ranges(
         &self,
-        pos: &Point<D, F>,
+        pos: &[F; D],
         depth: usize,
         heap_idx: usize,
         dim_radius_squared: F,
@@ -53,22 +65,22 @@ where
                 return 0;
             }
 
-            let own_pos = pos.pos[dim] - snn.min;
-            let reduced_radius = (dim_radius_squared + distances[dim]).sqrt();
+            let own_pos = pos[dim] - snn.min;
+            let reduced_radius = num_traits::Float::sqrt(dim_radius_squared + distances[dim]);
             let min = own_pos - reduced_radius;
             let max = own_pos + reduced_radius;
             let max_lut = lut_size::<D>() - 1;
 
             let min_scaled = min * snn.resolution;
             let idx = if min_scaled >= F::ZERO {
-                F::to_f32(min_scaled) as usize
+                min_scaled.to_usize_unchecked()
             } else {
                 0
             }
             .min(max_lut);
             let max_scaled = max * snn.resolution;
             let end_idx = if max_scaled >= F::ZERO {
-                F::to_f32(max_scaled) as usize
+                max_scaled.to_usize_unchecked()
             } else {
                 0
             }
@@ -86,9 +98,9 @@ where
 
         let split = self.nodes[heap_idx];
         let (left, right) = children(heap_idx);
-        let own_pos = pos.pos[dim];
+        let own_pos = pos[dim];
         let current_delta = distances[dim];
-        let dist = (own_pos - split).powi(2);
+        let dist = num_traits::Float::powi(own_pos - split, 2);
         let other_radius = dim_radius_squared + current_delta - dist;
 
         let mut total = 0;
@@ -129,7 +141,7 @@ where
         // Phase 2: forward sweep through positions_sorted
         let initial_len = results.len();
         let mut len = results.len();
-        let half_radius_threshold = radius_sq * F::HALF + F::from_f32(1e-4);
+        let half_radius_threshold = radius_sq * F::HALF + F::DIST_EPS;
 
         for range in ranges.iter() {
             // SAFETY: We need to allocate enough space upfront to allow us to write to the vector without checking if the size is valid
