@@ -4,9 +4,8 @@ use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{CompressDispatch, LaneCount, PDVec, SupportedLaneCount, compress_with_ids};
 use crate::svd::DynamicSVD;
-use crate::tree::{
-    LeafRange, Positions, Snn, build_tree, children, compute_total_depth, lut_size_for_dim,
-};
+use crate::tree::{LeafRange, Positions, Snn, build_tree, children, compute_total_depth};
+use crate::vec_writer::VecWriter;
 
 const W: usize = 8;
 use std::array::from_fn;
@@ -117,17 +116,14 @@ where
     }
 
     #[inline(always)]
-    fn compare(
+    fn compare_into<O: QueryOutput<I, F>>(
         &self,
         distances: [F; W],
         threshold: F,
-        results: &mut [MaybeUninit<usize>; W],
-    ) -> usize
-    where
-        usize: QueryOutput<I, F>,
-    {
+        results: &mut [MaybeUninit<O>; W],
+    ) -> usize {
         let (count, ids, dists) = self.compress(distances, threshold);
-        usize::store_compressed(count, &ids, &dists, results)
+        O::store_compressed(count, &ids, &dists, results)
     }
 }
 
@@ -162,8 +158,8 @@ thread_local! {
 #[derive(Clone)]
 pub struct DynATree<F: Scalar = f32, I: IdStorage = u32> {
     dim: usize,
+    projected_dim: usize,
     positions: Vec<F>,
-    // positions_projected: Vec<F>,
     positions_sorted: Vec<DynPDVec<W, F, I>>,
     node_ids: Vec<usize>,
     d_pos: Vec<F>,
@@ -185,7 +181,7 @@ where
     pub fn new(dim: usize, positions: &[F]) -> Self {
         assert!(dim > 0, "dimension must be at least 1");
         assert!(
-            positions.len() % dim == 0,
+            positions.len().is_multiple_of(dim),
             "positions length must be a multiple of dim"
         );
         let n = positions.len() / dim;
@@ -195,8 +191,8 @@ where
 
         let mut tree = DynATree {
             dim,
+            projected_dim: dim.min(td + 1),
             positions: positions.to_vec(),
-            // positions_projected: Vec::new(),
             positions_sorted: Vec::new(),
             node_ids: Vec::new(),
             d_pos: Vec::new(),
@@ -215,28 +211,19 @@ where
     ///
     /// `positions` must have length `n * dim` (same dim as construction).
     pub fn update(&mut self, positions: &[F]) {
-        assert!(positions.len() % self.dim == 0);
+        assert!(positions.len().is_multiple_of(self.dim));
         self.positions.copy_from_slice(positions);
         let n = positions.len() / self.dim;
 
         let td = compute_total_depth(n);
         self.total_depth = td;
+        let k = self.dim.min(td + 1);
+        self.projected_dim = k;
 
-        self.svd.compute_svd(
-            &positions
-                .chunks(self.dim)
-                .map(|chunk| chunk)
-                .collect::<Vec<_>>(),
-        );
+        self.svd
+            .compute_svd(&positions.chunks(self.dim).collect::<Vec<_>>());
 
-        let positions_projected = positions
-            .chunks(self.dim)
-            .map(|chunk| {
-                self.svd
-                    .project(&chunk.iter().map(|&x| x).collect::<Vec<_>>())
-            })
-            .flatten()
-            .collect::<Vec<_>>();
+        let positions_projected = self.svd.project_all(positions, self.dim, k);
 
         let num_internal = (1usize << td) - 1;
         let num_leaves = 1usize << td;
@@ -255,7 +242,7 @@ where
 
         let pos_view = FlatPositions {
             data: &positions_projected,
-            dim: self.dim,
+            dim: k,
         };
         build_tree(
             &mut nodes,
@@ -273,6 +260,7 @@ where
         self.leaves = leaves;
         self.node_ids = node_ids;
         self.positions_sorted.clear();
+        self.positions_sorted.reserve(n);
 
         let dim = self.dim;
         for snn in self.leaves.iter_mut() {
@@ -326,27 +314,31 @@ where
         &self.positions[start..start + self.dim]
     }
 
-    /// Query all points within `radius` of `pos`.
-    /// Appends matching node IDs to `results`.
+    /// Find all points within Euclidean `radius` of `pos`.
+    ///
+    /// Results are appended to `results`, which is not cleared first. The output
+    /// type `O` is determined by the [`QueryOutput`] trait — use `usize` for
+    /// indices only, or [`IdDist<usize, f32>`](crate::IdDist) for (index, squared distance) pairs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pos.len() != self.dim()`.
     pub fn query_radius<O>(&self, pos: &[F], radius: F, results: &mut Vec<O>)
     where
         O: QueryOutput<I, F>,
     {
         assert_eq!(pos.len(), self.dim);
-        let pos_projected = DynPoint::new(&self.svd.project(pos));
+        let pos_projected = DynPoint::new(&self.svd.project_truncated(pos, self.projected_dim));
         let pos = DynPoint::new(pos);
         let radius_sq = radius * radius;
         let normalized_radius = self.svd.normalize_radius(radius);
         let norm_radius_sq = normalized_radius * normalized_radius;
 
-        // let pos_projected = DynPoint::new(&pos.pos);
-        // let norm_radius_sq = radius_sq;
-
         SCRATCH.with(|scratch| {
             let mut ranges = scratch.take();
             ranges.clear();
 
-            let mut distances = vec![F::ZERO; self.dim];
+            let mut distances = vec![F::ZERO; self.projected_dim];
             let _ = self.collect_ranges(
                 &pos_projected,
                 0,
@@ -360,25 +352,6 @@ where
 
             scratch.set(ranges);
         });
-    }
-
-    /// Query all points within `radius` of `pos`, returning (ID, squared_distance) pairs.
-    pub fn query_radius_with_distances(&self, pos: &[F], radius: F) -> Vec<(usize, F)> {
-        assert_eq!(pos.len(), self.dim);
-        let mut ids = Vec::new();
-        self.query_radius(pos, radius, &mut ids);
-        ids.iter()
-            .map(|&id| {
-                let other = self.position(id);
-                let dist_sq: F = (0..self.dim)
-                    .map(|j| {
-                        let d = pos[j] - other[j];
-                        d * d
-                    })
-                    .sum();
-                (id, dist_sq)
-            })
-            .collect()
     }
 
     fn collect_ranges(
@@ -403,7 +376,7 @@ where
             let reduced_radius = Float::sqrt(dim_radius_squared + distances[dim]);
             let min = own_pos - reduced_radius;
             let max = own_pos + reduced_radius;
-            let max_lut = lut_size_for_dim(self.dim) - 1;
+            let max_lut = snn.lut.len() / 2 - 1;
 
             let min_scaled = min * snn.resolution;
             let idx = if min_scaled >= F::ZERO {
@@ -459,39 +432,28 @@ where
     where
         O: QueryOutput<I, F>,
     {
-        let mut capacity = results.capacity();
-        let initial_len = results.len();
-        let mut len = results.len();
+        let mut writer = VecWriter::new(results);
         let half_radius_threshold = radius_sq * F::HALF + F::from_f32(1e-4).unwrap();
         let use_half = self.dim >= 6;
 
         for range in ranges.iter() {
-            if len + (range.max_i - range.min_i) * W + W - 1 > capacity {
-                results.reserve((len - initial_len) + (range.max_i - range.min_i) * W + W - 1);
-                capacity = results.capacity();
-            }
+            writer.ensure_capacity((range.max_i - range.min_i) * W + W - 1);
 
             for other_pos in &self.positions_sorted[range.min_i..range.max_i] {
-                let results_slice = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        results.as_mut_ptr().wrapping_add(len) as *mut MaybeUninit<usize>,
-                        W,
-                    )
-                };
+                // SAFETY: ensure_capacity was called above with enough room for
+                // all PDVecs in this range. compare_into initializes exactly
+                // new_elements entries in the chunk.
+                let chunk = unsafe { writer.next_chunk_unchecked::<W>() };
                 let new_elements = if !use_half {
                     let distances = other_pos.dist_squared(&pos.pos);
-                    other_pos.compare(distances, radius_sq, results_slice.try_into().unwrap())
+                    other_pos.compare_into(distances, radius_sq, chunk)
                 } else {
                     let distances = other_pos.dist_half_squared(&pos.pos, pos.squared_half);
-                    other_pos.compare(
-                        distances,
-                        half_radius_threshold,
-                        results_slice.try_into().unwrap(),
-                    )
+                    other_pos.compare_into(distances, half_radius_threshold, chunk)
                 };
-                len += new_elements;
+                unsafe { writer.advance(new_elements) };
             }
         }
-        unsafe { results.set_len(len) };
+        writer.finish();
     }
 }

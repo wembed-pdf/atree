@@ -1,4 +1,5 @@
 use atree::simd::PDVec;
+use atree::IdDist;
 use std::mem::MaybeUninit;
 
 // ── ASM inspection wrappers ──────────────────────────────────────────
@@ -18,7 +19,7 @@ pub fn asm_compare_u32_f32_w8(
     pdvec: &PDVec<4, 8>,
     distances: [f32; 8],
     threshold: f32,
-    results: &mut [MaybeUninit<(u32, f32)>; 8],
+    results: &mut [MaybeUninit<IdDist<u32, f32>>; 8],
 ) -> usize {
     pdvec.compare_into(distances, threshold, results)
 }
@@ -28,7 +29,7 @@ pub fn asm_compare_usize_f32_w8(
     pdvec: &PDVec<4, 8>,
     distances: [f32; 8],
     threshold: f32,
-    results: &mut [MaybeUninit<(usize, f32)>; 8],
+    results: &mut [MaybeUninit<IdDist<usize, f32>>; 8],
 ) -> usize {
     pdvec.compare_into(distances, threshold, results)
 }
@@ -380,16 +381,16 @@ fn test_streaming_with_distances() {
     let query = [1.0f32, 0.5];
     let radius = 2.0;
 
-    let mut vec_results: Vec<(usize, f32)> = Vec::new();
+    let mut vec_results: Vec<IdDist<usize, f32>> = Vec::new();
     tree.query_radius(&query, radius, &mut vec_results);
-    let streaming_results: Vec<(usize, f32)> = tree
-        .query_radius_streaming::<(usize, f32)>(&query, radius)
+    let streaming_results: Vec<IdDist<usize, f32>> = tree
+        .query_radius_streaming::<IdDist<usize, f32>>(&query, radius)
         .collect();
 
     assert_eq!(vec_results.len(), streaming_results.len());
-    for ((vid, vd), (sid, sd)) in vec_results.iter().zip(streaming_results.iter()) {
-        assert_eq!(vid, sid);
-        assert!((vd - sd).abs() < 1e-5, "dist mismatch: {vd} vs {sd}");
+    for (v, s) in vec_results.iter().zip(streaming_results.iter()) {
+        assert_eq!(v.id, s.id);
+        assert!((v.dist - s.dist).abs() < 1e-5, "dist mismatch: {} vs {}", v.dist, s.dist);
     }
 }
 
@@ -401,15 +402,15 @@ fn test_streaming_with_distances_via_conversion() {
         .collect();
     let tree: ATree<2> = ATree::new(&positions);
 
-    // Test streaming with (usize, f32) output type directly
-    let results: Vec<(usize, f32)> = tree
-        .query_radius_streaming::<(usize, f32)>(&[1.0, 0.5], 2.0)
+    // Test streaming with IdDist<usize, f32> output type directly
+    let results: Vec<IdDist<usize, f32>> = tree
+        .query_radius_streaming::<IdDist<usize, f32>>(&[1.0, 0.5], 2.0)
         .collect();
     assert!(!results.is_empty());
-    for &(id, dist_sq) in &results {
-        let p = tree.position(id);
+    for r in &results {
+        let p = tree.position(r.id);
         let actual = (p[0] - 1.0) * (p[0] - 1.0) + (p[1] - 0.5) * (p[1] - 0.5);
-        assert!((dist_sq - actual).abs() < 1e-5);
+        assert!((r.dist - actual).abs() < 1e-5);
     }
 }
 
@@ -426,18 +427,18 @@ fn test_streaming_dist_high_dim() {
     let tree: ATree<8> = ATree::new(&positions);
     let query = [0.0f32; 8];
 
-    let mut vec_results: Vec<(usize, f32)> = Vec::new();
+    let mut vec_results: Vec<IdDist<usize, f32>> = Vec::new();
     tree.query_radius(&query, 2.0, &mut vec_results);
-    let streaming_results: Vec<(usize, f32)> = tree
-        .query_radius_streaming::<(usize, f32)>(&query, 2.0)
+    let streaming_results: Vec<IdDist<usize, f32>> = tree
+        .query_radius_streaming::<IdDist<usize, f32>>(&query, 2.0)
         .collect();
 
     assert_eq!(vec_results.len(), streaming_results.len());
-    for ((vid, vd), (sid, sd)) in vec_results.iter().zip(streaming_results.iter()) {
-        assert_eq!(vid, sid);
+    for (v, s) in vec_results.iter().zip(streaming_results.iter()) {
+        assert_eq!(v.id, s.id);
         assert!(
-            (vd - sd).abs() < 1e-5,
-            "dist mismatch at id={vid}: {vd} vs {sd}"
+            (v.dist - s.dist).abs() < 1e-5,
+            "dist mismatch at id={}: {} vs {}", v.id, v.dist, s.dist
         );
     }
 }
@@ -510,17 +511,17 @@ pub fn asm_fold_filtered_d8(
     radius: f32,
     out: &mut Vec<usize>,
 ) {
-    tree.query_radius_streaming::<(usize, f32)>(pos, radius)
-        .filter(|&(_id, dist)| dist < 1.0)
-        .for_each(|(id, _)| out.push(id));
+    tree.query_radius_streaming::<IdDist<usize, f32>>(pos, radius)
+        .filter(|r| r.dist < 1.0)
+        .for_each(|r| out.push(r.id));
 }
 
 /// fold_core path: D=8, unfiltered for_each into Vec.
 /// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_fold_d8'
 #[inline(never)]
 pub fn asm_fold_d8(tree: &atree::ATree<8>, pos: &[f32; 8], radius: f32, out: &mut Vec<usize>) {
-    tree.query_radius_streaming::<(usize, f32)>(pos, radius)
-        .for_each(|(id, _)| out.push(id));
+    tree.query_radius_streaming::<IdDist<usize, f32>>(pos, radius)
+        .for_each(|r| out.push(r.id));
 }
 
 /// snn path (non-iterator): D=8, for comparison.
@@ -583,7 +584,7 @@ pub fn asm_manual_compare_d8(
     }
 }
 
-/// Manual PDVec loop using compare_into_initialized → (u32, f32) pairs: D=8.
+/// Manual PDVec loop using compare_into_initialized → IdDist<u32, f32> pairs: D=8.
 /// Writes interleaved (id, dist) pairs via AVX-512 interleave path.
 /// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_manual_compare_into_u32_f32_d8'
 #[inline(never)]
@@ -592,11 +593,11 @@ pub fn asm_manual_compare_into_u32_f32_d8(
     pos: [f32; 8],
     squared_half: f32,
     half_radius_threshold: f32,
-    out: &mut Vec<(u32, f32)>,
+    out: &mut Vec<IdDist<u32, f32>>,
 ) {
     for pdvec in pdvecs {
         let distances = pdvec.dist_half_squared(pos, squared_half);
-        let mut results = [(0u32, 0.0f32); 8];
+        let mut results = [IdDist { id: 0u32, dist: 0.0f32 }; 8];
         let count = pdvec.compare_into_initialized(distances, half_radius_threshold, &mut results);
         for i in 0..count {
             out.push(results[i]);
@@ -604,7 +605,7 @@ pub fn asm_manual_compare_into_u32_f32_d8(
     }
 }
 
-/// Manual PDVec loop using compare_into_initialized → (usize, f32) pairs: D=8.
+/// Manual PDVec loop using compare_into_initialized → IdDist<usize, f32> pairs: D=8.
 /// Writes interleaved (id, dist) pairs via AVX-512 widen+interleave path.
 /// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_manual_compare_into_usize_f32_d8'
 #[inline(never)]
@@ -613,11 +614,11 @@ pub fn asm_manual_compare_into_usize_f32_d8(
     pos: [f32; 8],
     squared_half: f32,
     half_radius_threshold: f32,
-    out: &mut Vec<(usize, f32)>,
+    out: &mut Vec<IdDist<usize, f32>>,
 ) {
     for pdvec in pdvecs {
         let distances = pdvec.dist_half_squared(pos, squared_half);
-        let mut results = [(0usize, 0.0f32); 8];
+        let mut results = [IdDist { id: 0usize, dist: 0.0f32 }; 8];
         let count = pdvec.compare_into_initialized(distances, half_radius_threshold, &mut results);
         for i in 0..count {
             out.push(results[i]);
@@ -689,7 +690,7 @@ fn test_asm_d8_variants() {
         compare_results,
         u32_f32_results
             .iter()
-            .map(|&(id, _)| id as usize)
+            .map(|r| r.id as usize)
             .collect::<Vec<_>>()
     );
 
@@ -699,7 +700,7 @@ fn test_asm_d8_variants() {
         compare_results,
         usize_f32_results
             .iter()
-            .map(|&(id, _)| id)
+            .map(|r| r.id)
             .collect::<Vec<_>>()
     );
 }

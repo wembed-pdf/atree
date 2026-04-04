@@ -1,4 +1,4 @@
-use std::mem::{MaybeUninit, offset_of, size_of};
+use std::mem::MaybeUninit;
 
 use crate::scalar::{IdStorage, Scalar};
 
@@ -153,16 +153,42 @@ impl<F: Scalar> QueryOutput<u32, F> for usize {
     }
 }
 
-// ── (u32, F) pair output ────────────────────────────────────────────
+// ── IdDist: repr(C) pair output ─────────────────────────────────────
 
-const _: () = assert!(size_of::<(u32, f32)>() == 8);
-const _: () = assert!(offset_of!((u32, f32), 0) == 0);
-const _: () = assert!(offset_of!((u32, f32), 1) == 4);
+/// An (id, squared distance) pair with guaranteed memory layout.
+///
+/// Unlike tuples, `#[repr(C)]` guarantees field order in memory,
+/// making this type safe for direct SIMD interleaved stores.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+pub struct IdDist<I, F> {
+    pub id: I,
+    pub dist: F,
+}
 
-impl QueryOutput<u32, f32> for (u32, f32) {
+impl<I: Default, F: Default> Default for IdDist<I, F> {
+    #[inline(always)]
+    fn default() -> Self {
+        Self {
+            id: I::default(),
+            dist: F::default(),
+        }
+    }
+}
+
+impl<I, F> From<IdDist<I, F>> for (I, F) {
+    #[inline(always)]
+    fn from(v: IdDist<I, F>) -> Self {
+        (v.id, v.dist)
+    }
+}
+
+// ── IdDist<u32, f32> ────────────────────────────────────────────────
+
+impl QueryOutput<u32, f32> for IdDist<u32, f32> {
     #[inline(always)]
     fn from_match(id: u32, distance: f32) -> Self {
-        (id, distance)
+        Self { id, dist: distance }
     }
 
     #[inline(always)]
@@ -174,33 +200,31 @@ impl QueryOutput<u32, f32> for (u32, f32) {
     ) -> usize {
         #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx512f") && W >= 8 {
+            // SAFETY: IdDist<u32, f32> is #[repr(C)] with layout [u32, f32] = 8 bytes.
+            // AVX-512 feature detected at runtime.
             unsafe { interleave_store_u32_f32_avx512(ids, dists, dst) };
             return count;
         }
         for i in 0..W {
-            dst[i].write((ids[i], dists[i]));
+            dst[i].write(Self { id: ids[i], dist: dists[i] });
         }
         count
     }
 }
 
-impl QueryOutput<u32, f64> for (u32, f64) {
+impl QueryOutput<u32, f64> for IdDist<u32, f64> {
     #[inline(always)]
     fn from_match(id: u32, distance: f64) -> Self {
-        (id, distance)
+        Self { id, dist: distance }
     }
 }
 
-// ── (u64, F) pair output ────────────────────────────────────────────
+// ── IdDist<u64, f32> ────────────────────────────────────────────────
 
-const _: () = assert!(size_of::<(u64, f32)>() == 16);
-const _: () = assert!(offset_of!((u64, f32), 0) == 0);
-const _: () = assert!(offset_of!((u64, f32), 1) == 8);
-
-impl QueryOutput<u32, f32> for (u64, f32) {
+impl QueryOutput<u32, f32> for IdDist<u64, f32> {
     #[inline(always)]
     fn from_match(id: u32, distance: f32) -> Self {
-        (id as u64, distance)
+        Self { id: id as u64, dist: distance }
     }
 
     #[inline(always)]
@@ -212,50 +236,46 @@ impl QueryOutput<u32, f32> for (u64, f32) {
     ) -> usize {
         #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx512f") && W >= 8 {
+            // SAFETY: IdDist<u64, f32> is #[repr(C)] with layout [u64, f32, pad32] = 16 bytes.
+            // AVX-512 feature detected at runtime.
             unsafe { interleave_store_u64_f32_avx512(ids, dists, dst) };
             return count;
         }
         for i in 0..W {
-            dst[i].write((ids[i] as u64, dists[i]));
+            dst[i].write(Self { id: ids[i] as u64, dist: dists[i] });
         }
         count
     }
 }
 
-impl QueryOutput<u64, f32> for (u64, f32) {
+impl QueryOutput<u64, f32> for IdDist<u64, f32> {
     #[inline(always)]
     fn from_match(id: u64, distance: f32) -> Self {
-        (id, distance)
+        Self { id, dist: distance }
     }
 }
 
-impl QueryOutput<u32, f64> for (u64, f64) {
+impl QueryOutput<u32, f64> for IdDist<u64, f64> {
     #[inline(always)]
     fn from_match(id: u32, distance: f64) -> Self {
-        (id as u64, distance)
+        Self { id: id as u64, dist: distance }
     }
 }
 
-impl QueryOutput<u64, f64> for (u64, f64) {
+impl QueryOutput<u64, f64> for IdDist<u64, f64> {
     #[inline(always)]
     fn from_match(id: u64, distance: f64) -> Self {
-        (id, distance)
+        Self { id, dist: distance }
     }
 }
 
-// ── (usize, f32) pair output ────────────────────────────────────────
+// ── IdDist<usize, f32> ─────────────────────────────────────────────
 
 #[cfg(target_pointer_width = "64")]
-const _: () = {
-    assert!(size_of::<(usize, f32)>() == 16);
-    assert!(offset_of!((usize, f32), 0) == 0);
-    assert!(offset_of!((usize, f32), 1) == 8);
-};
-
-impl QueryOutput<u32, f32> for (usize, f32) {
+impl QueryOutput<u32, f32> for IdDist<usize, f32> {
     #[inline(always)]
     fn from_match(id: u32, distance: f32) -> Self {
-        (id as usize, distance)
+        Self { id: id as usize, dist: distance }
     }
 
     #[inline(always)]
@@ -265,56 +285,60 @@ impl QueryOutput<u32, f32> for (usize, f32) {
         dists: &[f32; W],
         dst: &mut [MaybeUninit<Self>; W],
     ) -> usize {
-        #[cfg(all(target_pointer_width = "64", target_arch = "x86_64"))]
+        #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx512f") && W >= 8 {
-            // SAFETY: (usize, f32) has same layout as (u64, f32) on 64-bit (verified above)
+            // SAFETY: On 64-bit, IdDist<usize, f32> and IdDist<u64, f32> have identical
+            // repr(C) layouts: [u64/usize (8 bytes), f32 (4 bytes), pad (4 bytes)] = 16 bytes.
             unsafe {
                 interleave_store_u64_f32_avx512(
                     ids,
                     dists,
-                    &mut *(dst as *mut _ as *mut [MaybeUninit<(u64, f32)>; W]),
+                    &mut *(dst as *mut [MaybeUninit<IdDist<usize, f32>>; W]
+                        as *mut [MaybeUninit<IdDist<u64, f32>>; W]),
                 )
             };
             return count;
         }
         for i in 0..W {
-            dst[i].write((ids[i] as usize, dists[i]));
+            dst[i].write(Self { id: ids[i] as usize, dist: dists[i] });
         }
         count
     }
 }
 
-impl QueryOutput<u64, f32> for (usize, f32) {
+#[cfg(target_pointer_width = "64")]
+impl QueryOutput<u64, f32> for IdDist<usize, f32> {
     #[inline(always)]
     fn from_match(id: u64, distance: f32) -> Self {
-        (id as usize, distance)
+        Self { id: id as usize, dist: distance }
     }
 }
 
-impl QueryOutput<u32, f64> for (usize, f64) {
+#[cfg(target_pointer_width = "64")]
+impl QueryOutput<u32, f64> for IdDist<usize, f64> {
     #[inline(always)]
     fn from_match(id: u32, distance: f64) -> Self {
-        (id as usize, distance)
+        Self { id: id as usize, dist: distance }
     }
 }
 
-impl QueryOutput<u64, f64> for (usize, f64) {
+#[cfg(target_pointer_width = "64")]
+impl QueryOutput<u64, f64> for IdDist<usize, f64> {
     #[inline(always)]
     fn from_match(id: u64, distance: f64) -> Self {
-        (id as usize, distance)
+        Self { id: id as usize, dist: distance }
     }
 }
 
 // ── SIMD helpers ─────────────────────────────────────────────────────
 
-/// Interleave u32 IDs + f32 distances → (u32, f32) pairs.
+/// Interleave u32 IDs + f32 distances → IdDist<u32, f32> pairs.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-// TODO: Return custum struct, tupls are not guaranteed to have its fields represented in memory in order. This is currently potentially unsound
 unsafe fn interleave_store_u32_f32_avx512<const W: usize>(
     ids: &[u32; W],
     dists: &[f32; W],
-    dst: &mut [MaybeUninit<(u32, f32)>; W],
+    dst: &mut [MaybeUninit<IdDist<u32, f32>>; W],
 ) {
     use std::arch::x86_64::*;
     let ids_v = _mm256_castsi256_ps(unsafe { _mm256_loadu_epi32(ids.as_ptr() as *const i32) });
@@ -342,13 +366,13 @@ unsafe fn interleave_store_u32_f32_avx512<const W: usize>(
     }
 }
 
-/// Interleave widened u64 IDs + f32 distances → (u64, f32) pairs.
+/// Interleave widened u64 IDs + f32 distances → IdDist<u64, f32> pairs.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn interleave_store_u64_f32_avx512<const W: usize>(
     ids: &[u32; W],
     dists: &[f32; W],
-    dst: &mut [MaybeUninit<(u64, f32)>; W],
+    dst: &mut [MaybeUninit<IdDist<u64, f32>>; W],
 ) {
     use std::arch::x86_64::*;
     let ids_wide = _mm512_cvtepu32_epi64(unsafe { _mm256_loadu_epi32(ids.as_ptr() as *const i32) });

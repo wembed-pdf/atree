@@ -4,13 +4,16 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssi
 use num_traits::FromPrimitive;
 
 #[cfg(feature = "svd")]
-pub trait Svd: nalgebra::RealField {}
+pub trait Svd: faer_core::Entity + faer_core::ComplexField {}
 #[cfg(not(feature = "svd"))]
 pub trait Svd {}
 
 impl Svd for f32 {}
 impl Svd for f64 {}
 
+/// Numeric type used for coordinates and distances.
+///
+/// Implemented for `f32` and `f64`.
 pub trait Scalar:
     Copy
     + Default
@@ -47,6 +50,9 @@ pub trait Scalar:
     fn total_cmp(&self, other: &Self) -> std::cmp::Ordering;
 }
 
+/// Integer type used to store point IDs internally.
+///
+/// Implemented for `u32` (up to ~4 billion points) and `u64`.
 pub trait IdStorage: Copy + Default + 'static + Send + Sync + std::fmt::Debug {
     const SENTINEL: Self;
     fn from_usize(v: usize) -> Self;

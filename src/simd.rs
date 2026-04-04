@@ -1,3 +1,4 @@
+use std::array::from_fn;
 use std::mem::MaybeUninit;
 
 use crate::output::QueryOutput;
@@ -34,7 +35,7 @@ where
     LaneCount<W>: SupportedLaneCount,
 {
     lanes: [[F; W]; D],
-    sqared_half: [F; W],
+    squared_half: [F; W],
     ids: [I; W],
 }
 
@@ -46,7 +47,7 @@ where
     pub fn new(vecs: impl Iterator<Item = ([F; D], usize)>) -> Self {
         let mut inf = Self::inf();
         for (i, (vec, id)) in vecs.enumerate().take(W) {
-            inf.sqared_half[i] = vec.iter().copied().map(|x| x * x).sum::<F>() * F::HALF;
+            inf.squared_half[i] = vec.iter().copied().map(|x| x * x).sum::<F>() * F::HALF;
             inf.ids[i] = I::from_usize(id);
             for j in 0..D {
                 inf.lanes[j][i] = vec[j];
@@ -62,85 +63,77 @@ where
     pub fn inf() -> Self {
         Self {
             lanes: [[F::NAN; W]; D],
-            sqared_half: [F::INFINITY; W],
+            squared_half: [F::INFINITY; W],
             ids: [I::SENTINEL; W],
         }
     }
 
     #[inline(always)]
     pub fn dist_squared(&self, pos: [F; D]) -> [F; W] {
-        let diff = std::array::from_fn(|i| self.lanes[0][i] - pos[0]);
+        let diff = from_fn(|i| self.lanes[0][i] - pos[0]);
         let mut acc = diff.map(|x| x * x);
         for j in 1..D {
-            let diff: [_; W] = std::array::from_fn(|i| self.lanes[j][i] - pos[j]);
-            acc = std::array::from_fn(|i| Float::mul_add(diff[i], diff[i], acc[i]));
+            let diff: [_; W] = from_fn(|i| self.lanes[j][i] - pos[j]);
+            acc = from_fn(|i| Float::mul_add(diff[i], diff[i], acc[i]));
         }
         acc
     }
     #[inline(always)]
     pub fn dist_squared_no_fma(&self, pos: [F; D]) -> [F; W] {
-        let diff = std::array::from_fn(|i| self.lanes[0][i] - pos[0]);
+        let diff = from_fn(|i| self.lanes[0][i] - pos[0]);
         let mut acc = diff.map(|x| x * x);
         for j in 1..D {
-            let diff: [_; W] = std::array::from_fn(|i| self.lanes[j][i] - pos[j]);
-            acc = std::array::from_fn(|i| diff[i] * diff[i] + acc[i]);
+            let diff: [_; W] = from_fn(|i| self.lanes[j][i] - pos[j]);
+            acc = from_fn(|i| diff[i] * diff[i] + acc[i]);
         }
         acc
     }
 
     #[inline(always)]
     pub fn dist_half_squared(&self, pos: [F; D], squared_half: F) -> [F; W] {
-        let mut acc1: [F; W] = std::array::from_fn(|i| self.sqared_half[i]);
-        let mut acc2: [F; W] = std::array::from_fn(|_| squared_half);
+        let mut acc1: [F; W] = from_fn(|i| self.squared_half[i]);
+        let mut acc2: [F; W] = from_fn(|_| squared_half);
 
         for j in (0..D).step_by(2) {
-            acc1 = std::array::from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc1[i]));
+            acc1 = from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc1[i]));
             if j + 1 < D {
-                acc2 = std::array::from_fn(|i| {
-                    Float::mul_add(self.lanes[j + 1][i], -pos[j + 1], acc2[i])
-                });
+                acc2 = from_fn(|i| Float::mul_add(self.lanes[j + 1][i], -pos[j + 1], acc2[i]));
             }
         }
 
-        std::array::from_fn(|i| acc1[i] + acc2[i])
+        from_fn(|i| acc1[i] + acc2[i])
     }
 
     #[inline(always)]
     pub fn dist_half_squared_4_acc(&self, pos: [F; D], squared_half: F) -> [F; W] {
-        let mut acc1: [F; W] = std::array::from_fn(|i| self.sqared_half[i]);
-        let mut acc2: [F; W] = std::array::from_fn(|_| squared_half);
-        let mut acc3: [F; W] = std::array::from_fn(|_| F::ZERO);
-        let mut acc4: [F; W] = std::array::from_fn(|_| F::ZERO);
+        let mut acc1: [F; W] = from_fn(|i| self.squared_half[i]);
+        let mut acc2: [F; W] = from_fn(|_| squared_half);
+        let mut acc3: [F; W] = from_fn(|_| F::ZERO);
+        let mut acc4: [F; W] = from_fn(|_| F::ZERO);
 
         for j in (0..D).step_by(4) {
             // let j = j * 2;
-            acc1 = std::array::from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc1[i]));
+            acc1 = from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc1[i]));
             if j + 1 < D {
-                acc2 = std::array::from_fn(|i| {
-                    Float::mul_add(self.lanes[j + 1][i], -pos[j + 1], acc2[i])
-                });
+                acc2 = from_fn(|i| Float::mul_add(self.lanes[j + 1][i], -pos[j + 1], acc2[i]));
             }
             if j + 2 < D {
-                acc3 = std::array::from_fn(|i| {
-                    Float::mul_add(self.lanes[j + 2][i], -pos[j + 2], acc3[i])
-                });
+                acc3 = from_fn(|i| Float::mul_add(self.lanes[j + 2][i], -pos[j + 2], acc3[i]));
             }
             if j + 3 < D {
-                acc4 = std::array::from_fn(|i| {
-                    Float::mul_add(self.lanes[j + 3][i], -pos[j + 3], acc4[i])
-                });
+                acc4 = from_fn(|i| Float::mul_add(self.lanes[j + 3][i], -pos[j + 3], acc4[i]));
             }
         }
 
-        std::array::from_fn(|i| acc1[i] + acc2[i] + acc3[i] + acc4[i])
+        from_fn(|i| (acc1[i] + acc3[i]) + (acc2[i] + acc4[i]))
     }
 
     #[inline(always)]
     pub fn dist_half_squared_single_acc(&self, pos: [F; D], squared_half: F) -> [F; W] {
-        let mut acc: [F; W] = std::array::from_fn(|i| self.sqared_half[i] + squared_half);
+        let mut acc: [F; W] = from_fn(|i| self.squared_half[i] + squared_half);
 
         for j in (0..D).step_by(1) {
-            acc = std::array::from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc[i]));
+            acc = from_fn(|i| Float::mul_add(self.lanes[j][i], -pos[j], acc[i]));
         }
 
         acc
@@ -612,8 +605,8 @@ fn compress_wide_f32_u32_16(
     use simd_lookup::wide_utils::SimdSplit;
     use wide::{f32x8, u32x16};
 
-    let dist_lo = f32x8::new(std::array::from_fn(|i| distances[i]));
-    let dist_hi = f32x8::new(std::array::from_fn(|i| distances[8 + i]));
+    let dist_lo = f32x8::new(from_fn(|i| distances[i]));
+    let dist_hi = f32x8::new(from_fn(|i| distances[8 + i]));
     let threshold_v = f32x8::splat(threshold);
     let mask_lo = dist_lo.simd_le(threshold_v).to_bitmask() as u8;
     let mask_hi = dist_hi.simd_le(threshold_v).to_bitmask() as u8;
@@ -635,11 +628,8 @@ fn compress_wide_f32_u32_16(
     }
 
     // Compress distances via bit reinterpretation + VPERMD
-    let dist_bits_lo =
-        wide::u32x8::from(std::array::from_fn::<u32, 8, _>(|i| distances[i].to_bits()));
-    let dist_bits_hi = wide::u32x8::from(std::array::from_fn::<u32, 8, _>(|i| {
-        distances[8 + i].to_bits()
-    }));
+    let dist_bits_lo = wide::u32x8::from(from_fn::<u32, 8, _>(|i| distances[i].to_bits()));
+    let dist_bits_hi = wide::u32x8::from(from_fn::<u32, 8, _>(|i| distances[8 + i].to_bits()));
     let (comp_dist_lo, _) = compress_u32x8(dist_bits_lo, mask_lo);
     let (comp_dist_hi, _) = compress_u32x8(dist_bits_hi, mask_hi);
 
@@ -689,8 +679,8 @@ fn compress_wide_f64_8<I: Copy + Default>(
 ) -> (usize, [I; 8], [f64; 8]) {
     use wide::f64x4;
 
-    let dist_lo = f64x4::new(std::array::from_fn(|i| distances[i]));
-    let dist_hi = f64x4::new(std::array::from_fn(|i| distances[4 + i]));
+    let dist_lo = f64x4::new(from_fn(|i| distances[i]));
+    let dist_hi = f64x4::new(from_fn(|i| distances[4 + i]));
     let threshold_v = f64x4::splat(threshold);
     let mask_lo = dist_lo.simd_le(threshold_v).to_bitmask() as u8;
     let mask_hi = dist_hi.simd_le(threshold_v).to_bitmask() as u8;
@@ -727,7 +717,7 @@ where
 {
     let proxy = PDVec::<1, W, F, I> {
         lanes: [[F::NAN; W]],
-        sqared_half: [F::INFINITY; W],
+        squared_half: [F::INFINITY; W],
         ids,
     };
     proxy.compress(distances, threshold)
