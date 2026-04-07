@@ -1,5 +1,5 @@
 {
-  description = "ATree - Spatial index data structure with C/C++ and Python bindings";
+  description = "SPRK-tree - Spatial index data structure with C/C++ and Python bindings";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -15,7 +15,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
-        toolchain = pkgs.rust-bin.nightly.latest.default.override {
+        toolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = ["rust-src" "clippy" "rust-analyzer"];
         };
 
@@ -37,6 +37,7 @@
           packages = with pkgs; [
             toolchain
             maturin
+            cargo-semver-checks
           ];
 
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [

@@ -8,8 +8,13 @@ use crate::scalar::{IdStorage, Scalar};
 /// batch-stores compressed results, defaulting to a `from_match` loop but
 /// overridable for SIMD-optimized widening and interleaving.
 pub trait QueryOutput<I: IdStorage, F: Scalar>: Copy + Sized {
+    /// Create one output element from a matching point's ID and squared distance.
     fn from_match(id: I, distance: F) -> Self;
 
+    /// Batch-store compressed results from a SIMD compare.
+    ///
+    /// The default implementation loops over `from_match`; specializations
+    /// may use SIMD interleaved stores for better throughput.
     #[inline(always)]
     fn store_compressed<const W: usize>(
         count: usize,
@@ -162,7 +167,9 @@ impl<F: Scalar> QueryOutput<u32, F> for usize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct IdDist<I, F> {
+    /// The index of the matched point.
     pub id: I,
+    /// The squared Euclidean distance to the query point.
     pub dist: F,
 }
 

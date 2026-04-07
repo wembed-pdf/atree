@@ -3,7 +3,7 @@ use num_traits::Float;
 use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{CompressDispatch, LaneCount, PDVec, SupportedLaneCount, compress_with_ids};
-use crate::svd::DynamicSVD;
+use crate::svd::DynamicSvd;
 use crate::tree::{LeafRange, Positions, Snn, build_tree, children, compute_total_depth};
 use crate::vec_writer::VecWriter;
 
@@ -45,8 +45,8 @@ impl<const W: usize, F: Scalar, I: IdStorage> DynPDVec<W, F, I> {
         for (i, (vec, id)) in vecs.enumerate().take(W) {
             result.squared_half[i] = vec.iter().copied().map(|x| x * x).sum::<F>() * F::HALF;
             result.ids[i] = I::from_usize(id);
-            for j in 0..dim {
-                result.lanes[j][i] = vec[j];
+            for (lane, &v) in result.lanes.iter_mut().zip(vec) {
+                lane[i] = v;
             }
         }
         result
@@ -62,11 +62,10 @@ impl<const W: usize, F: Scalar, I: IdStorage> DynPDVec<W, F, I> {
 
     #[inline(always)]
     fn dist_squared(&self, pos: &[F]) -> [F; W] {
-        let dim = self.lanes.len();
         let diff: [F; W] = from_fn(|i| self.lanes[0][i] - pos[0]);
         let mut acc = diff.map(|x| x * x);
-        for j in 1..dim {
-            let diff: [F; W] = from_fn(|i| self.lanes[j][i] - pos[j]);
+        for (lane, &p) in self.lanes[1..].iter().zip(&pos[1..]) {
+            let diff: [F; W] = from_fn(|i| lane[i] - p);
             acc = from_fn(|i| Float::mul_add(diff[i], diff[i], acc[i]));
         }
         acc
@@ -97,8 +96,8 @@ impl<const W: usize, F: Scalar, I: IdStorage> DynPDVec<W, F, I> {
         for (slice, &p) in remainder.iter().zip(pos_remainder.iter()) {
             acc = from_fn(|i| Float::mul_add(slice[i], -p, acc[i]));
         }
-        for j in 1..UNROLL {
-            acc = from_fn(|i| acc[i] + accs[j][i]);
+        for a in &accs[1..] {
+            acc = from_fn(|i| acc[i] + a[i]);
         }
 
         acc
@@ -166,7 +165,7 @@ pub struct DynSprk<F: Scalar = f32, I: IdStorage = u32> {
     nodes: Vec<F>,
     leaves: Vec<Snn<F>>,
     total_depth: usize,
-    svd: DynamicSVD<F>,
+    svd: DynamicSvd<F>,
 }
 
 impl<F: Scalar, I: IdStorage> DynSprk<F, I>
@@ -199,7 +198,7 @@ where
             nodes: vec![F::ZERO; num_internal],
             leaves: vec![Snn::default(); num_leaves],
             total_depth: td,
-            svd: DynamicSVD::new(),
+            svd: DynamicSvd::new(),
         };
         if !positions.is_empty() {
             tree.update(positions);

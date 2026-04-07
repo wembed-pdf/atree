@@ -5,9 +5,13 @@ edition = "2024"
 description = "High-performance spatial index for radius queries in D-dimensional Euclidean space"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/wembed-pdf/rembed"
+repository = "https://github.com/wembed-pdf/sprk"
 keywords = ["spatial", "index", "kd-tree", "nearest-neighbor", "simd"]
 categories = ["algorithms", "data-structures", "science"]
+authors = [
+  "Dennis Kobert <dennis@kobert.dev>",
+  "Tobias Kempf <kempf.tobias@web.de>",
+]
 
 [dependencies]
 simd-lookup = { version = "0.1.0", optional = true }

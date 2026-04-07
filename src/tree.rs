@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{LaneCount, PDVec, SupportedLaneCount};
-use crate::svd::SVD;
+use crate::svd::Svd;
 
 pub(crate) const LEAFSIZE: usize = 500;
 pub(crate) const SVD_THRESHOLD: usize = 16;
@@ -94,7 +94,7 @@ where
     pub(crate) nodes: Vec<F>,
     pub(crate) leaves: Vec<Snn<F>>,
     pub(crate) total_depth: usize,
-    pub(crate) svd: SVD<D, F>,
+    pub(crate) svd: Svd<D, F>,
 }
 
 impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> Sprk<D, W, F, I>
@@ -117,7 +117,7 @@ where
             nodes: vec![F::ZERO; num_internal],
             leaves: vec![Snn::default(); num_leaves],
             total_depth: td,
-            svd: SVD::new(),
+            svd: Svd::new(),
         };
         if !positions.is_empty() {
             tree.update(positions);

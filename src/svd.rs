@@ -1,10 +1,6 @@
 use crate::scalar::Scalar;
 #[cfg(feature = "svd")]
-use faer_core;
-#[cfg(feature = "svd")]
 use faer_core::Mat;
-#[cfg(feature = "svd")]
-use faer_svd;
 
 /// Maximum number of rows fed into the SVD solver.
 /// Above this limit we use strided sampling.
@@ -12,7 +8,7 @@ use faer_svd;
 const SVD_SAMPLE_LIMIT: usize = 100_000;
 
 #[derive(Clone, Debug)]
-pub struct SVD<const D: usize, F: Scalar> {
+pub struct Svd<const D: usize, F: Scalar> {
     #[cfg(feature = "svd")]
     mean: [F; D],
     #[cfg(feature = "svd")]
@@ -20,13 +16,13 @@ pub struct SVD<const D: usize, F: Scalar> {
     _phantom: std::marker::PhantomData<[F; D]>,
 }
 
-impl<const D: usize, F: Scalar + Default> Default for SVD<D, F> {
+impl<const D: usize, F: Scalar + Default> Default for Svd<D, F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const D: usize, F: Scalar> SVD<D, F> {
+impl<const D: usize, F: Scalar> Svd<D, F> {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "svd")]
@@ -58,12 +54,13 @@ impl<const D: usize, F: Scalar> SVD<D, F> {
         self.mean = [F::ZERO; D];
         let inv_n = F::ONE / F::from_usize(sample_n).unwrap();
         for i in (0..n).step_by(stride) {
+            #[allow(clippy::needless_range_loop)] // indexing by const-generic D
             for j in 0..D {
                 self.mean[j] += data[i][j];
             }
         }
-        for j in 0..D {
-            self.mean[j] *= inv_n;
+        for m in &mut self.mean {
+            *m *= inv_n;
         }
 
         // Center sampled data
@@ -114,6 +111,7 @@ impl<const D: usize, F: Scalar> SVD<D, F> {
 
         let projected = &self.vt * centered;
         let mut output = [F::ZERO; D];
+        #[allow(clippy::needless_range_loop)] // faer Col indexed read
         for j in 0..D {
             output[j] = projected.read(j);
         }
@@ -141,19 +139,20 @@ impl<const D: usize, F: Scalar> SVD<D, F> {
 
         // Convert back to array form
         let mut out = vec![[F::ZERO; D]; n];
-        for i in 0..n {
+        for (i, row) in out.iter_mut().enumerate() {
+            #[allow(clippy::needless_range_loop)] // faer Mat indexed read
             for j in 0..D {
-                out[i][j] = result.read(i, j);
+                row[j] = result.read(i, j);
             }
         }
         out
     }
 }
 
-// ── Faer-based DynamicSVD ───────────────────────────────────────────
+// ── Faer-based DynamicSvd ───────────────────────────────────────────
 
 #[derive(Clone, Debug)]
-pub struct DynamicSVD<F: Scalar> {
+pub struct DynamicSvd<F: Scalar> {
     #[cfg(feature = "svd")]
     mean: Vec<F>,
     #[cfg(feature = "svd")]
@@ -161,13 +160,13 @@ pub struct DynamicSVD<F: Scalar> {
     normalization_factor: F,
 }
 
-impl<F: Scalar + Default> Default for DynamicSVD<F> {
+impl<F: Scalar + Default> Default for DynamicSvd<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F: Scalar> DynamicSVD<F> {
+impl<F: Scalar> DynamicSvd<F> {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "svd")]
@@ -202,12 +201,12 @@ impl<F: Scalar> DynamicSVD<F> {
         let inv_n = F::ONE / F::from_usize(sample_n).unwrap();
         for i in (0..n).step_by(stride) {
             let row = data[i];
-            for j in 0..d {
-                self.mean[j] += row[j];
+            for (m, &val) in self.mean.iter_mut().zip(row) {
+                *m += val;
             }
         }
-        for j in 0..d {
-            self.mean[j] *= inv_n;
+        for m in &mut self.mean {
+            *m *= inv_n;
         }
 
         // Center sampled data and find max abs value in one pass
@@ -274,13 +273,13 @@ impl<F: Scalar> DynamicSVD<F> {
     /// Project a single point, truncating to first `k` output dimensions.
     #[cfg(feature = "svd")]
     pub fn project_truncated(&self, point: &[F], k: usize) -> Vec<F> {
-        let d = self.mean.len();
         let inv_norm = F::ONE / self.normalization_factor;
         let mut output = vec![F::ZERO; k];
+        #[allow(clippy::needless_range_loop)] // faer Mat indexed read
         for i in 0..k {
             let mut acc = F::ZERO;
-            for j in 0..d {
-                acc += self.vt.read(i, j) * (point[j] - self.mean[j]);
+            for (j, (&p, &m)) in point.iter().zip(self.mean.iter()).enumerate() {
+                acc += self.vt.read(i, j) * (p - m);
             }
             output[i] = acc * inv_norm;
         }
@@ -314,9 +313,10 @@ impl<F: Scalar> DynamicSVD<F> {
 
         // Flatten to Vec<F> of length n * k
         let mut out = vec![F::ZERO; n * k];
-        for i in 0..n {
+        for (i, chunk) in out.chunks_exact_mut(k).enumerate() {
+            #[allow(clippy::needless_range_loop)] // faer Mat indexed read
             for j in 0..k {
-                out[i * k + j] = result.read(i, j);
+                chunk[j] = result.read(i, j);
             }
         }
         out
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn test_faer_svd() {
         let data = setup_data();
-        let mut svd = SVD::<2, f32>::new();
+        let mut svd = Svd::<2, f32>::new();
         svd.compute_svd(&data);
 
         let projected = svd.project(&[1.0, 1.0]);

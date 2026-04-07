@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! A high-performance spatial index for radius queries in D-dimensional Euclidean space.
 //!
 //! The core data structure is [`Sprk`], which combines KD-tree-like axis-aligned
@@ -36,23 +38,28 @@
 //! ```
 
 #[cfg(feature = "internals")]
+#[allow(missing_docs)]
 pub mod dynamic;
 #[cfg(not(feature = "internals"))]
 pub(crate) mod dynamic;
 
+/// Result types and the [`QueryOutput`] trait that controls what `query_radius` produces.
 pub mod output;
 
 #[cfg(feature = "internals")]
+#[allow(missing_docs)]
 pub mod scalar;
 #[cfg(not(feature = "internals"))]
 pub(crate) mod scalar;
 
 #[cfg(feature = "internals")]
+#[allow(missing_docs)]
 pub mod simd;
 #[cfg(not(feature = "internals"))]
 pub(crate) mod simd;
 
 #[cfg(feature = "internals")]
+#[allow(missing_docs)]
 pub mod svd;
 #[cfg(not(feature = "internals"))]
 pub(crate) mod svd;

@@ -3,8 +3,10 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssi
 
 use num_traits::FromPrimitive;
 
+#[doc(hidden)]
 #[cfg(feature = "svd")]
 pub trait Svd: faer_core::Entity + faer_core::ComplexField {}
+#[doc(hidden)]
 #[cfg(not(feature = "svd"))]
 pub trait Svd {}
 
@@ -33,20 +35,32 @@ pub trait Scalar:
     + Send
     + Sync
     + num_traits::Float
-    + std::fmt::Debug // TODO:
+    + std::fmt::Debug
     + Svd
 {
+    /// Not-a-number sentinel.
     const NAN: Self;
+    /// Positive infinity.
     const INFINITY: Self;
+    /// Additive identity.
     const ZERO: Self;
+    /// `0.5`.
     const HALF: Self;
+    /// Multiplicative identity.
     const ONE: Self;
+    /// Small epsilon used in distance threshold comparisons.
     const DIST_EPS: Self;
+    /// Truncating cast to `usize` (undefined for negative or NaN values).
     fn to_usize_unchecked(self) -> usize;
+    /// Square root.
     fn sqrt(self) -> Self;
+    /// Raise to an integer power.
     fn powi(self, n: i32) -> Self;
+    /// Floor (round towards negative infinity).
     fn floor(self) -> Self;
+    /// Ceiling (round towards positive infinity).
     fn ceil(self) -> Self;
+    /// Total ordering (NaN-aware).
     fn total_cmp(&self, other: &Self) -> std::cmp::Ordering;
 }
 
@@ -54,8 +68,11 @@ pub trait Scalar:
 ///
 /// Implemented for `u32` (up to ~4 billion points) and `u64`.
 pub trait IdStorage: Copy + Default + 'static + Send + Sync + std::fmt::Debug {
+    /// Value used to fill unused SIMD lanes.
     const SENTINEL: Self;
+    /// Convert from `usize`.
     fn from_usize(v: usize) -> Self;
+    /// Convert to `usize`.
     fn to_usize(self) -> usize;
 }
 

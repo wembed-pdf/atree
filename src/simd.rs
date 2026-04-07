@@ -49,8 +49,8 @@ where
         for (i, (vec, id)) in vecs.enumerate().take(W) {
             inf.squared_half[i] = vec.iter().copied().map(|x| x * x).sum::<F>() * F::HALF;
             inf.ids[i] = I::from_usize(id);
-            for j in 0..D {
-                inf.lanes[j][i] = vec[j];
+            for (lane, &v) in inf.lanes.iter_mut().zip(&vec) {
+                lane[i] = v;
             }
         }
         inf
@@ -72,8 +72,8 @@ where
     pub fn dist_squared(&self, pos: [F; D]) -> [F; W] {
         let diff = from_fn(|i| self.lanes[0][i] - pos[0]);
         let mut acc = diff.map(|x| x * x);
-        for j in 1..D {
-            let diff: [_; W] = from_fn(|i| self.lanes[j][i] - pos[j]);
+        for (lane, &p) in self.lanes[1..].iter().zip(&pos[1..]) {
+            let diff: [_; W] = from_fn(|i| lane[i] - p);
             acc = from_fn(|i| Float::mul_add(diff[i], diff[i], acc[i]));
         }
         acc
@@ -82,8 +82,8 @@ where
     pub fn dist_squared_no_fma(&self, pos: [F; D]) -> [F; W] {
         let diff = from_fn(|i| self.lanes[0][i] - pos[0]);
         let mut acc = diff.map(|x| x * x);
-        for j in 1..D {
-            let diff: [_; W] = from_fn(|i| self.lanes[j][i] - pos[j]);
+        for (lane, &p) in self.lanes[1..].iter().zip(&pos[1..]) {
+            let diff: [_; W] = from_fn(|i| lane[i] - p);
             acc = from_fn(|i| diff[i] * diff[i] + acc[i]);
         }
         acc
@@ -152,8 +152,8 @@ where
         for (slice, &p) in remainder.iter().zip(pos_remainder.iter()) {
             acc = from_fn(|i| Float::mul_add(slice[i], -p, acc[i]));
         }
-        for j in 1..UNROLL {
-            acc = from_fn(|i| acc[i] + accs[j][i]);
+        for a in &accs[1..] {
+            acc = from_fn(|i| acc[i] + a[i]);
         }
 
         acc
@@ -176,6 +176,7 @@ where
         let mut ids = [I::default(); W];
         let mut dists = [F::default(); W];
         let mut count = 0;
+        #[allow(clippy::needless_range_loop)] // branchless compress with dual cursors
         for i in 0..W {
             ids[count] = self.ids[i];
             dists[count] = distances[i];
@@ -651,12 +652,8 @@ fn compress_wide_f32_u32_16(
     let mut id_arr = [0u32; 16];
     let arr_lo = comp_ids_lo.to_array();
     let arr_hi = comp_ids_hi.to_array();
-    for i in 0..8 {
-        id_arr[i] = arr_lo[i];
-    }
-    for i in 0..8 {
-        id_arr[count_lo + i] = arr_hi[i];
-    }
+    id_arr[..8].copy_from_slice(&arr_lo);
+    id_arr[count_lo..count_lo + 8].copy_from_slice(&arr_hi);
 
     // Compress distances via bit reinterpretation + VPERMD
     let dist_bits_lo = wide::u32x8::from(from_fn::<u32, 8, _>(|i| distances[i].to_bits()));

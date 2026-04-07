@@ -1,5 +1,5 @@
-use sprk::simd::PDVec;
 use sprk::IdDist;
+use sprk::simd::PDVec;
 use std::mem::MaybeUninit;
 
 // ── ASM inspection wrappers ──────────────────────────────────────────
@@ -390,7 +390,12 @@ fn test_streaming_with_distances() {
     assert_eq!(vec_results.len(), streaming_results.len());
     for (v, s) in vec_results.iter().zip(streaming_results.iter()) {
         assert_eq!(v.id, s.id);
-        assert!((v.dist - s.dist).abs() < 1e-5, "dist mismatch: {} vs {}", v.dist, s.dist);
+        assert!(
+            (v.dist - s.dist).abs() < 1e-5,
+            "dist mismatch: {} vs {}",
+            v.dist,
+            s.dist
+        );
     }
 }
 
@@ -438,7 +443,10 @@ fn test_streaming_dist_high_dim() {
         assert_eq!(v.id, s.id);
         assert!(
             (v.dist - s.dist).abs() < 1e-5,
-            "dist mismatch at id={}: {} vs {}", v.id, v.dist, s.dist
+            "dist mismatch at id={}: {} vs {}",
+            v.id,
+            v.dist,
+            s.dist
         );
     }
 }
@@ -557,8 +565,8 @@ pub fn asm_manual_compress_d8(
     for pdvec in pdvecs {
         let distances = pdvec.dist_half_squared(pos, squared_half);
         let (count, ids, _dists) = pdvec.compress(distances, half_radius_threshold);
-        for i in 0..count {
-            out.push(ids[i] as usize);
+        for &id in &ids[..count] {
+            out.push(id as usize);
         }
     }
 }
@@ -578,8 +586,8 @@ pub fn asm_manual_compare_d8(
         let distances = pdvec.dist_half_squared(pos, squared_half);
         let mut results = [0usize; 8];
         let count = pdvec.compare_into_initialized(distances, half_radius_threshold, &mut results);
-        for i in 0..count {
-            out.push(results[i]);
+        for &id in &results[..count] {
+            out.push(id);
         }
     }
 }
@@ -597,10 +605,13 @@ pub fn asm_manual_compare_into_u32_f32_d8(
 ) {
     for pdvec in pdvecs {
         let distances = pdvec.dist_half_squared(pos, squared_half);
-        let mut results = [IdDist { id: 0u32, dist: 0.0f32 }; 8];
+        let mut results = [IdDist {
+            id: 0u32,
+            dist: 0.0f32,
+        }; 8];
         let count = pdvec.compare_into_initialized(distances, half_radius_threshold, &mut results);
-        for i in 0..count {
-            out.push(results[i]);
+        for &id in &results[..count] {
+            out.push(id);
         }
     }
 }
@@ -618,10 +629,13 @@ pub fn asm_manual_compare_into_usize_f32_d8(
 ) {
     for pdvec in pdvecs {
         let distances = pdvec.dist_half_squared(pos, squared_half);
-        let mut results = [IdDist { id: 0usize, dist: 0.0f32 }; 8];
+        let mut results = [IdDist {
+            id: 0usize,
+            dist: 0.0f32,
+        }; 8];
         let count = pdvec.compare_into_initialized(distances, half_radius_threshold, &mut results);
-        for i in 0..count {
-            out.push(results[i]);
+        for &id in &results[..count] {
+            out.push(id);
         }
     }
 }
@@ -673,7 +687,7 @@ fn test_asm_d8_variants() {
     // Exercise manual PDVec loop variants so they aren't DCE'd.
     // We use tree's internal positions_sorted; since that's pub(crate),
     // build a small slice of PDVecs directly for the manual tests.
-    let pdvecs = &tree.positions_sorted()[..];
+    let pdvecs = tree.positions_sorted();
     let sq_half: f32 = query.iter().map(|x| x * x).sum::<f32>() * 0.5;
     let threshold = 2.0f32 * 2.0 * 0.5 + 1e-4; // half_radius_threshold
 
@@ -698,10 +712,7 @@ fn test_asm_d8_variants() {
     asm_manual_compare_into_usize_f32_d8(pdvecs, query, sq_half, threshold, &mut usize_f32_results);
     assert_eq!(
         compare_results,
-        usize_f32_results
-            .iter()
-            .map(|r| r.id)
-            .collect::<Vec<_>>()
+        usize_f32_results.iter().map(|r| r.id).collect::<Vec<_>>()
     );
 }
 
