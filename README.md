@@ -14,6 +14,17 @@ A high-performance spatial index for radius queries in D-dimensional Euclidean s
 
 ## Usage
 
+Add the `sprk` dependency with:
+```
+cargo add sprk
+```
+and for the best performance, create a `.cargo/config.toml` with the following content:
+```
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Ctarget-cpu=native"]
+```
+
+
 ```rust
 use sprk::Sprk;
 
