@@ -1,5 +1,5 @@
-use atree::simd::PDVec;
-use atree::IdDist;
+use sprk::simd::PDVec;
+use sprk::IdDist;
 use std::mem::MaybeUninit;
 
 // ── ASM inspection wrappers ──────────────────────────────────────────
@@ -282,7 +282,7 @@ fn test_f64_w8_compare() {
 
 #[test]
 fn test_streaming_matches_vec() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 2]> = (0..500)
         .map(|i| {
             let x = (i as f32) * 0.1;
@@ -291,7 +291,7 @@ fn test_streaming_matches_vec() {
         })
         .collect();
 
-    let tree: ATree<2> = ATree::new(&positions);
+    let tree: Sprk<2> = Sprk::new(&positions);
 
     for radius in [0.5, 1.0, 2.0, 5.0, 10.0] {
         let query = [1.0f32, 0.5];
@@ -311,7 +311,7 @@ fn test_streaming_matches_vec() {
 
 #[test]
 fn test_streaming_f64_u64() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f64; 2]> = (0..500)
         .map(|i| {
             let x = (i as f64) * 0.1;
@@ -320,7 +320,7 @@ fn test_streaming_f64_u64() {
         })
         .collect();
 
-    let tree: ATree<2, 8, f64, u64> = ATree::new(&positions);
+    let tree: Sprk<2, 8, f64, u64> = Sprk::new(&positions);
     let mut vec_results: Vec<usize> = Vec::new();
     tree.query_radius(&[0.0, 0.0], 1.0, &mut vec_results);
     let streaming_results: Vec<usize> = tree
@@ -331,11 +331,11 @@ fn test_streaming_f64_u64() {
 
 #[test]
 fn test_streaming_empty() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 2]> = (0..500)
         .map(|i| [i as f32 * 10.0, i as f32 * 10.0])
         .collect();
-    let tree: ATree<2> = ATree::new(&positions);
+    let tree: Sprk<2> = Sprk::new(&positions);
     // Query far from any point with tiny radius
     let count = tree
         .query_radius_streaming::<usize>(&[999.0, 999.0], 0.001)
@@ -345,7 +345,7 @@ fn test_streaming_empty() {
 
 #[test]
 fn test_streaming_high_dim() {
-    use atree::ATree;
+    use sprk::Sprk;
     // D=8 triggers the dist_half_squared path (D >= 6)
     let positions: Vec<[f32; 8]> = (0..300)
         .map(|i| {
@@ -353,7 +353,7 @@ fn test_streaming_high_dim() {
             [v, v, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         })
         .collect();
-    let tree: ATree<8> = ATree::new(&positions);
+    let tree: Sprk<8> = Sprk::new(&positions);
     let query = [0.0f32; 8];
     let vec_results = {
         let mut r: Vec<usize> = Vec::new();
@@ -368,7 +368,7 @@ fn test_streaming_high_dim() {
 
 #[test]
 fn test_streaming_with_distances() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 2]> = (0..500)
         .map(|i| {
             let x = (i as f32) * 0.1;
@@ -377,7 +377,7 @@ fn test_streaming_with_distances() {
         })
         .collect();
 
-    let tree: ATree<2> = ATree::new(&positions);
+    let tree: Sprk<2> = Sprk::new(&positions);
     let query = [1.0f32, 0.5];
     let radius = 2.0;
 
@@ -396,11 +396,11 @@ fn test_streaming_with_distances() {
 
 #[test]
 fn test_streaming_with_distances_via_conversion() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 2]> = (0..500)
         .map(|i| [i as f32 * 0.1, i as f32 * 0.05])
         .collect();
-    let tree: ATree<2> = ATree::new(&positions);
+    let tree: Sprk<2> = Sprk::new(&positions);
 
     // Test streaming with IdDist<usize, f32> output type directly
     let results: Vec<IdDist<usize, f32>> = tree
@@ -416,7 +416,7 @@ fn test_streaming_with_distances_via_conversion() {
 
 #[test]
 fn test_streaming_dist_high_dim() {
-    use atree::ATree;
+    use sprk::Sprk;
     // D=8 triggers dist_half_squared path — distances must be recomputed
     let positions: Vec<[f32; 8]> = (0..300)
         .map(|i| {
@@ -424,7 +424,7 @@ fn test_streaming_dist_high_dim() {
             [v, v, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         })
         .collect();
-    let tree: ATree<8> = ATree::new(&positions);
+    let tree: Sprk<8> = Sprk::new(&positions);
     let query = [0.0f32; 8];
 
     let mut vec_results: Vec<IdDist<usize, f32>> = Vec::new();
@@ -447,7 +447,7 @@ fn test_streaming_dist_high_dim() {
 
 #[inline(never)]
 pub fn asm_streaming_collect_to_slice(
-    tree: &atree::ATree<2>,
+    tree: &sprk::Sprk<2>,
     pos: &[f32; 2],
     radius: f32,
     out: &mut [usize],
@@ -464,22 +464,22 @@ pub fn asm_streaming_collect_to_slice(
 }
 
 #[inline(never)]
-pub fn asm_streaming_fold_count(tree: &atree::ATree<2>, pos: &[f32; 2], radius: f32) -> usize {
+pub fn asm_streaming_fold_count(tree: &sprk::Sprk<2>, pos: &[f32; 2], radius: f32) -> usize {
     tree.query_radius_streaming::<usize>(pos, radius).count()
 }
 
 #[inline(never)]
-pub fn asm_streaming_fold_sum(tree: &atree::ATree<2>, pos: &[f32; 2], radius: f32) -> usize {
+pub fn asm_streaming_fold_sum(tree: &sprk::Sprk<2>, pos: &[f32; 2], radius: f32) -> usize {
     tree.query_radius_streaming::<usize>(pos, radius).sum()
 }
 
 #[test]
 fn test_asm_streaming_codegen() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 2]> = (0..500)
         .map(|i| [i as f32 * 0.1, i as f32 * 0.05])
         .collect();
-    let tree: ATree<2> = ATree::new(&positions);
+    let tree: Sprk<2> = Sprk::new(&positions);
     let query = [1.0f32, 0.5];
 
     let expected = {
@@ -503,10 +503,10 @@ fn test_asm_streaming_codegen() {
 // ── D=8 fold vs snn ASM inspection ──────────────────────────────────
 
 /// fold_core path: D=8 (triggers dist_half_squared), filtered for_each into Vec.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_fold_filtered_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_fold_filtered_d8'
 #[inline(never)]
 pub fn asm_fold_filtered_d8(
-    tree: &atree::ATree<8>,
+    tree: &sprk::Sprk<8>,
     pos: &[f32; 8],
     radius: f32,
     out: &mut Vec<usize>,
@@ -517,25 +517,25 @@ pub fn asm_fold_filtered_d8(
 }
 
 /// fold_core path: D=8, unfiltered for_each into Vec.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_fold_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_fold_d8'
 #[inline(never)]
-pub fn asm_fold_d8(tree: &atree::ATree<8>, pos: &[f32; 8], radius: f32, out: &mut Vec<usize>) {
+pub fn asm_fold_d8(tree: &sprk::Sprk<8>, pos: &[f32; 8], radius: f32, out: &mut Vec<usize>) {
     tree.query_radius_streaming::<IdDist<usize, f32>>(pos, radius)
         .for_each(|r| out.push(r.id));
 }
 
 /// snn path (non-iterator): D=8, for comparison.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_snn_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_snn_d8'
 #[inline(never)]
-pub fn asm_snn_d8(tree: &atree::ATree<8>, pos: &[f32; 8], radius: f32, out: &mut Vec<usize>) {
+pub fn asm_snn_d8(tree: &sprk::Sprk<8>, pos: &[f32; 8], radius: f32, out: &mut Vec<usize>) {
     tree.query_radius(pos, radius, out);
 }
 
 /// query_radius: D=4, f32, u32, W=8, Vec<usize>
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_query_radius_d4'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_query_radius_d4'
 #[inline(never)]
 pub fn asm_query_radius_d4(
-    tree: &atree::ATree<4>,
+    tree: &sprk::Sprk<4>,
     pos: &[f32; 4],
     radius: f32,
     out: &mut Vec<usize>,
@@ -545,10 +545,10 @@ pub fn asm_query_radius_d4(
 
 /// Manual PDVec loop using compress() (returns by value): D=8.
 /// Baseline for iterator's fold_core approach.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_manual_compress_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_manual_compress_d8'
 #[inline(never)]
 pub fn asm_manual_compress_d8(
-    pdvecs: &[atree::simd::PDVec<8, 8>],
+    pdvecs: &[sprk::simd::PDVec<8, 8>],
     pos: [f32; 8],
     squared_half: f32,
     half_radius_threshold: f32,
@@ -565,10 +565,10 @@ pub fn asm_manual_compress_d8(
 
 /// Manual PDVec loop using compare_into_initialized → usize: D=8.
 /// This is what snn() uses internally — the &mut results path, IDs only.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_manual_compare_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_manual_compare_d8'
 #[inline(never)]
 pub fn asm_manual_compare_d8(
-    pdvecs: &[atree::simd::PDVec<8, 8>],
+    pdvecs: &[sprk::simd::PDVec<8, 8>],
     pos: [f32; 8],
     squared_half: f32,
     half_radius_threshold: f32,
@@ -586,10 +586,10 @@ pub fn asm_manual_compare_d8(
 
 /// Manual PDVec loop using compare_into_initialized → IdDist<u32, f32> pairs: D=8.
 /// Writes interleaved (id, dist) pairs via AVX-512 interleave path.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_manual_compare_into_u32_f32_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_manual_compare_into_u32_f32_d8'
 #[inline(never)]
 pub fn asm_manual_compare_into_u32_f32_d8(
-    pdvecs: &[atree::simd::PDVec<8, 8>],
+    pdvecs: &[sprk::simd::PDVec<8, 8>],
     pos: [f32; 8],
     squared_half: f32,
     half_radius_threshold: f32,
@@ -607,10 +607,10 @@ pub fn asm_manual_compare_into_u32_f32_d8(
 
 /// Manual PDVec loop using compare_into_initialized → IdDist<usize, f32> pairs: D=8.
 /// Writes interleaved (id, dist) pairs via AVX-512 widen+interleave path.
-/// Inspect with: cargo asm -p atree --test=simd --target-cpu=native 'asm_manual_compare_into_usize_f32_d8'
+/// Inspect with: cargo asm -p sprk --test=simd --target-cpu=native 'asm_manual_compare_into_usize_f32_d8'
 #[inline(never)]
 pub fn asm_manual_compare_into_usize_f32_d8(
-    pdvecs: &[atree::simd::PDVec<8, 8>],
+    pdvecs: &[sprk::simd::PDVec<8, 8>],
     pos: [f32; 8],
     squared_half: f32,
     half_radius_threshold: f32,
@@ -628,14 +628,14 @@ pub fn asm_manual_compare_into_usize_f32_d8(
 
 #[test]
 fn test_asm_query_radius_d4() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 4]> = (0..500)
         .map(|i| {
             let v = i as f32 * 0.1;
             [v, v * 0.5, 0.0, 0.0]
         })
         .collect();
-    let tree: ATree<4> = ATree::new(&positions);
+    let tree: Sprk<4> = Sprk::new(&positions);
     let mut results = Vec::new();
     asm_query_radius_d4(&tree, &[0.0; 4], 2.0, &mut results);
     assert!(!results.is_empty());
@@ -643,7 +643,7 @@ fn test_asm_query_radius_d4() {
 
 #[test]
 fn test_asm_d8_variants() {
-    use atree::ATree;
+    use sprk::Sprk;
     let positions: Vec<[f32; 8]> = (0..300)
         .map(|i| {
             let v = i as f32 * 0.1;
@@ -653,7 +653,7 @@ fn test_asm_d8_variants() {
             arr
         })
         .collect();
-    let tree: ATree<8> = ATree::new(&positions);
+    let tree: Sprk<8> = Sprk::new(&positions);
     let query = [0.0f32; 8];
 
     let mut snn_results: Vec<usize> = Vec::new();
@@ -705,11 +705,11 @@ fn test_asm_d8_variants() {
     );
 }
 
-// ── ATree f64+u64 integration test ──────────────────────────────────
+// ── Sprk f64+u64 integration test ──────────────────────────────────
 
 #[test]
-fn test_atree_f64_u64() {
-    use atree::ATree;
+fn test_sprk_f64_u64() {
+    use sprk::Sprk;
     let positions: Vec<[f64; 2]> = (0..500)
         .map(|i| {
             let x = (i as f64) * 0.1;
@@ -718,7 +718,7 @@ fn test_atree_f64_u64() {
         })
         .collect();
 
-    let tree: ATree<2, 8, f64, u64> = ATree::new(&positions);
+    let tree: Sprk<2, 8, f64, u64> = Sprk::new(&positions);
     assert_eq!(tree.len(), 500);
 
     let mut results: Vec<usize> = Vec::new();

@@ -1,5 +1,5 @@
 [package]
-name = "atree"
+name = "sprk"
 version = "0.1.0"
 edition = "2024"
 description = "High-performance spatial index for radius queries in D-dimensional Euclidean space"
@@ -27,4 +27,4 @@ svd = ["faer-svd", "faer-core", "dyn-stack"]
 internals = []
 
 [dev-dependencies]
-atree = { path = ".", features = ["internals"] }
+sprk = { path = ".", features = ["internals"] }

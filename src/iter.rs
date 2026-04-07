@@ -1,9 +1,9 @@
 use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{CompressDispatch, LaneCount, PDVec, SupportedLaneCount};
-use crate::tree::{ATree, LeafRange, Point, SVD_THRESHOLD};
+use crate::tree::{Sprk, LeafRange, Point, SVD_THRESHOLD};
 
-impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> ATree<D, W, F, I>
+impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> Sprk<D, W, F, I>
 where
     LaneCount<W>: SupportedLaneCount,
 {
@@ -60,7 +60,7 @@ where
     LaneCount<W>: SupportedLaneCount,
     O: QueryOutput<I, F> + Default + Copy,
 {
-    tree: &'a ATree<D, W, F, I>,
+    tree: &'a Sprk<D, W, F, I>,
     pos: Point<D, F>,
     radius_sq: F,
     ranges: Vec<LeafRange>,
@@ -83,7 +83,7 @@ where
     PDVec<D, W, F, I>: CompressDispatch<W, F, I>,
 {
     fn new(
-        tree: &'a ATree<D, W, F, I>,
+        tree: &'a Sprk<D, W, F, I>,
         pos: Point<D, F>,
         radius_sq: F,
         ranges: Vec<LeafRange>,
@@ -128,8 +128,10 @@ where
 
                 let distances = if D < 6 {
                     pdvec.dist_squared(self.pos.pos)
-                } else {
+                } else if D < 32 {
                     pdvec.dist_half_squared(self.pos.pos, self.pos.squared_half)
+                } else {
+                    pdvec.dist_half_squared_4_acc(self.pos.pos, self.pos.squared_half)
                 };
                 let count =
                     pdvec.compare_into_initialized(distances, self.radius_sq, &mut self.buf);

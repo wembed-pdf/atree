@@ -1,7 +1,7 @@
 use crate::output::QueryOutput;
 use crate::scalar::{IdStorage, Scalar};
 use crate::simd::{CompressDispatch, LaneCount, PDVec, SupportedLaneCount};
-use crate::tree::{ATree, LeafRange, Point, SVD_THRESHOLD, children, lut_size};
+use crate::tree::{Sprk, LeafRange, Point, SVD_THRESHOLD, children, lut_size};
 use crate::vec_writer::VecWriter;
 use std::cell::Cell;
 
@@ -9,7 +9,7 @@ thread_local! {
     pub(crate) static SCRATCH: Cell<Vec<LeafRange>> = Cell::new(Vec::with_capacity(128));
 }
 
-impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> ATree<D, W, F, I>
+impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> Sprk<D, W, F, I>
 where
     LaneCount<W>: SupportedLaneCount,
 {
@@ -23,8 +23,8 @@ where
     /// # Example
     ///
     /// ```
-    /// # use atree::ATree;
-    /// let tree: ATree<2> = ATree::new(&[[0.0f32, 0.0], [1.0, 0.0], [10.0, 10.0]]);
+    /// # use sprk::Sprk;
+    /// let tree: Sprk<2> = Sprk::new(&[[0.0f32, 0.0], [1.0, 0.0], [10.0, 10.0]]);
     /// let mut ids: Vec<u32> = Vec::new();
     /// tree.query_radius(&[0.5, 0.0], 1.0, &mut ids);
     /// assert_eq!(ids.len(), 2);
@@ -164,8 +164,11 @@ where
                 let new_elements = if D < 6 {
                     let distances = other_pos.dist_squared(pos.pos);
                     other_pos.compare_into(distances, radius_sq, chunk)
-                } else {
+                } else if D < 32 {
                     let distances = other_pos.dist_half_squared(pos.pos, pos.squared_half);
+                    other_pos.compare_into(distances, half_radius_threshold, chunk)
+                } else {
+                    let distances = other_pos.dist_half_squared_4_acc(pos.pos, pos.squared_half);
                     other_pos.compare_into(distances, half_radius_threshold, chunk)
                 };
                 unsafe { writer.advance(new_elements) };

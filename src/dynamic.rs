@@ -144,19 +144,19 @@ impl<F: Scalar> DynPoint<F> {
     }
 }
 
-// ── DynATree ─────────────────────────────────────────────────────────
+// ── DynSprk ─────────────────────────────────────────────────────────
 
 thread_local! {
     static SCRATCH: Cell<Vec<LeafRange>> = Cell::new(Vec::with_capacity(128));
 }
 
-/// ATree with runtime-specified dimensionality.
+/// Sprk with runtime-specified dimensionality.
 ///
-/// Unlike [`ATree`](crate::ATree) which uses const generics for the dimension,
-/// `DynATree` accepts the dimension at construction time. Positions are stored
+/// Unlike [`Sprk`](crate::Sprk) which uses const generics for the dimension,
+/// `DynSprk` accepts the dimension at construction time. Positions are stored
 /// as a flat `&[F]` with stride equal to `dim`.
 #[derive(Clone)]
-pub struct DynATree<F: Scalar = f32, I: IdStorage = u32> {
+pub struct DynSprk<F: Scalar = f32, I: IdStorage = u32> {
     dim: usize,
     projected_dim: usize,
     positions: Vec<F>,
@@ -169,12 +169,12 @@ pub struct DynATree<F: Scalar = f32, I: IdStorage = u32> {
     svd: DynamicSVD<F>,
 }
 
-impl<F: Scalar, I: IdStorage> DynATree<F, I>
+impl<F: Scalar, I: IdStorage> DynSprk<F, I>
 where
     usize: QueryOutput<I, F>,
     PDVec<1, W, F, I>: CompressDispatch<W, F, I>,
 {
-    /// Build a new DynATree from flat position data.
+    /// Build a new DynSprk from flat position data.
     ///
     /// `positions` has length `n * dim`, laid out as
     /// `[x0, y0, z0, x1, y1, z1, ...]`.
@@ -189,7 +189,7 @@ where
         let num_internal = (1usize << td) - 1;
         let num_leaves = 1usize << td;
 
-        let mut tree = DynATree {
+        let mut tree = DynSprk {
             dim,
             projected_dim: dim.min(td + 1),
             positions: positions.to_vec(),

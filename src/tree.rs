@@ -56,7 +56,7 @@ impl<const D: usize, F: Scalar> Positions<F> for [[F; D]] {
     }
 }
 
-// ── ATree ────────────────────────────────────────────────────────────
+// ── Sprk ────────────────────────────────────────────────────────────
 
 /// A spatial index for exact radius queries in D-dimensional Euclidean space.
 ///
@@ -74,16 +74,16 @@ impl<const D: usize, F: Scalar> Positions<F> for [[F; D]] {
 /// # Example
 ///
 /// ```
-/// use atree::ATree;
+/// use sprk::Sprk;
 ///
 /// let positions = vec![[1.0f32, 2.0], [3.0, 4.0], [5.0, 6.0]];
-/// let tree: ATree<2> = ATree::new(&positions);
+/// let tree: Sprk<2> = Sprk::new(&positions);
 ///
 /// let mut neighbors: Vec<u32> = Vec::new();
 /// tree.query_radius(&[2.0, 3.0], 3.0, &mut neighbors);
 /// ```
 #[derive(Clone)]
-pub struct ATree<const D: usize, const W: usize = 8, F: Scalar = f32, I: IdStorage = u32>
+pub struct Sprk<const D: usize, const W: usize = 8, F: Scalar = f32, I: IdStorage = u32>
 where
     LaneCount<W>: SupportedLaneCount,
 {
@@ -97,11 +97,11 @@ where
     pub(crate) svd: SVD<D, F>,
 }
 
-impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> ATree<D, W, F, I>
+impl<const D: usize, const W: usize, F: Scalar, I: IdStorage> Sprk<D, W, F, I>
 where
     LaneCount<W>: SupportedLaneCount,
 {
-    /// Build a new ATree from a slice of positions.
+    /// Build a new Sprk from a slice of positions.
     /// Each position is identified by its index in the slice.
     pub fn new(positions: &[[F; D]]) -> Self {
         let n = positions.len();
@@ -109,7 +109,7 @@ where
         let num_internal = (1usize << td) - 1;
         let num_leaves = 1usize << td;
 
-        let mut tree = ATree {
+        let mut tree = Sprk {
             positions: Vec::new(),
             positions_sorted: Vec::new(),
             node_ids: Vec::new(),

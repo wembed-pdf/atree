@@ -1,4 +1,6 @@
-# atree
+# ✨ SPRK-tree ✨
+
+**Sorted Projection Radius KD-tree**
 
 A high-performance spatial index for radius queries in D-dimensional Euclidean space. Combines a KD-tree-like partitioning structure with SIMD-vectorized leaf scans and lookup-table-based pruning to deliver fast radius queries, particularly for workloads with repeated queries against incrementally updated positions.
 
@@ -13,7 +15,7 @@ A high-performance spatial index for radius queries in D-dimensional Euclidean s
 ## Usage
 
 ```rust
-use atree::ATree;
+use sprk::Sprk;
 
 // Build a tree from 2D positions
 let positions: Vec<[f32; 2]> = vec![
@@ -22,7 +24,7 @@ let positions: Vec<[f32; 2]> = vec![
     [0.0, 1.0],
     [5.0, 5.0],
 ];
-let tree = ATree::<2>::new(&positions);
+let tree = Sprk::<2>::new(&positions);
 
 // Radius query — find all points within distance 1.5 of (0.5, 0.5)
 let mut results: Vec<u32> = Vec::new();
@@ -30,7 +32,7 @@ tree.query_radius(&[0.5, 0.5], 1.5, &mut results);
 // results contains indices 0, 1, 2
 
 // Get (index, squared_distance) pairs instead
-use atree::IdDist;
+use sprk::IdDist;
 let mut pairs: Vec<IdDist<u32, f32>> = Vec::new();
 tree.query_radius(&[0.5, 0.5], 1.5, &mut pairs);
 for p in &pairs {
@@ -56,15 +58,15 @@ Note: the streaming API can sometimes produce worse codegen than `query_radius` 
 
 ### Dynamic Dimensionality
 
-When the dimension is not known at compile time, use `DynATree`:
+When the dimension is not known at compile time, use `DynSprk`:
 
 ```rust
-use atree::DynATree;
+use sprk::DynSprk;
 
 let dim = 3;
 // Flat layout: [x0, y0, z0, x1, y1, z1, ...]
 let positions: Vec<f32> = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
-let tree = DynATree::new(dim, &positions);
+let tree = DynSprk::new(dim, &positions);
 
 let mut results: Vec<usize> = Vec::new();
 tree.query_radius(&[0.5, 0.5, 0.5], 2.0, &mut results);
@@ -72,7 +74,7 @@ tree.query_radius(&[0.5, 0.5, 0.5], 2.0, &mut results);
 
 ## Type Parameters
 
-`ATree<D, W, F, I>` is generic over:
+`Sprk<D, W, F, I>` is generic over:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -99,7 +101,7 @@ Disable defaults for a minimal build:
 
 ```toml
 [dependencies]
-atree = { version = "0.1", default-features = false }
+sprk = { version = "0.1", default-features = false }
 ```
 
 ## How It Works
