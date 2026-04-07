@@ -112,6 +112,3 @@ sprk = { version = "0.1", default-features = false }
 
 3. **SIMD compress hierarchy**: On x86_64 with AVX-512, native `vcompressps`/`vpcompressd` instructions are used. Otherwise, the `wide` crate provides portable SIMD via VPERMD shuffle tables. Scalar fallback is always available.
 
-## License
-
-MIT
