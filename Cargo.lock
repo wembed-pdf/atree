@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "sprk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dyn-stack 0.13.2",
  "faer-core",
@@ -781,14 +781,14 @@ dependencies = [
 
 [[package]]
 name = "sprk-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "sprk",
 ]
 
 [[package]]
 name = "sprk-python"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "numpy",
  "pyo3",

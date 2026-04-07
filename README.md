@@ -104,8 +104,8 @@ The `QueryOutput` trait controls what `query_radius` appends to the results vect
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `simd-compress` | yes | SIMD-accelerated result filtering via `wide` + `simd-lookup` |
-| `svd` | yes | SVD-based dimensionality reduction for D > 16 via `faer` |
-| `parallel` | yes | Parallel tree construction via `rayon` |
+| `svd` | no | SVD-based dimensionality reduction for D > 16 via `faer` |
+| `parallel` | no | Parallel tree construction via `rayon` |
 | `internals` | no | Exposes internal modules (`simd`, `scalar`, `svd`, `dynamic`) for advanced use |
 
 Disable defaults for a minimal build:

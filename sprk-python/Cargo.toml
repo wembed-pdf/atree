@@ -16,6 +16,6 @@ name = "sprk"
 crate-type = ["cdylib"]
 
 [dependencies]
-sprk = { version = "0.1.0", path = ".." }
+sprk = { path = ".." }
 pyo3 = { version = "0.28", features = ["extension-module"] }
 numpy = "0.28"
