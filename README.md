@@ -1,5 +1,8 @@
 # ✨ SPRK-tree ✨
 
+[![Crates.io](https://img.shields.io/crates/v/sprk.svg)](https://crates.io/crates/sprk)
+[![docs.rs](https://img.shields.io/docsrs/sprk)](https://docs.rs/sprk)
+
 **Sorted Projection Radius KD-tree**
 
 A high-performance spatial index for radius queries in D-dimensional Euclidean space. Combines a KD-tree-like partitioning structure with SIMD-vectorized leaf scans and lookup-table-based pruning to deliver fast radius queries, particularly for workloads with repeated queries against incrementally updated positions.
