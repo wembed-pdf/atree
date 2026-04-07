@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "sprk-python", "sprk-ffi"]
+
 [package]
 name = "sprk"
 version = "0.1.0"
